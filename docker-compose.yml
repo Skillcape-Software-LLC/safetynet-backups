@@ -2,29 +2,32 @@ services:
   backup-cli:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/cli:latest
     volumes:
-      - ./data:/data          # SQLite database (shared with backup-web)
+      - safetynet_data:/data  # SQLite database (shared with backup-web)
       - ./keys:/keys:ro
       - ./logs:/logs
       # To enable source discovery, mount your Docker volumes parent directory:
-      # - /opt/docker:/browse:ro
+      - ~/docker:/browse:ro
     environment:
       - DB_PATH=/data/safetynet.db
-      - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
-      # - BROWSE_ROOT=/browse   # Uncomment together with the volume above
+      - BACKUP_KEY_PASSPHRASE=ociH00713!
+      - BROWSE_ROOT=/browse
 
   backup-web:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/web:latest
     ports:
       - "5200:8080"
     volumes:
-      - ./data:/data          # SQLite database (shared with backup-cli)
+      - safetynet_data:/data  # SQLite database (shared with backup-cli)
       - ./keys:/keys:ro
       - ./logs:/logs
       # To enable source discovery, mount your Docker volumes parent directory:
-      # - /opt/docker:/browse:ro
+      - ~/docker:/browse:ro
     environment:
       - DB_PATH=/data/safetynet.db
-      - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
-      # - BROWSE_ROOT=/browse   # Uncomment together with the volume above
+      - BACKUP_KEY_PASSPHRASE=ociH00713!
+      - BROWSE_ROOT=/browse
       - ASPNETCORE_ENVIRONMENT=Production
     restart: unless-stopped
+
+volumes:
+  safetynet_data:

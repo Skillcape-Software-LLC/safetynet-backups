@@ -11,7 +11,7 @@ FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 RUN groupadd -r --force backup && id -u backup &>/dev/null || useradd -r -g backup -s /sbin/nologin backup
 WORKDIR /app
 COPY --from=build /publish .
-RUN mkdir -p /logs && chown -R backup:backup /app /logs
+RUN mkdir -p /logs /data && chown -R backup:backup /app /logs /data
 VOLUME ["/keys", "/data", "/config", "/logs"]
 EXPOSE 8080
 USER backup
