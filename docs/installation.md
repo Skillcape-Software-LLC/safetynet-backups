@@ -97,7 +97,7 @@ If you are backing up multiple unrelated directories, add additional bind mounts
 Before running a full backup, confirm the container can reach your SFTP server:
 
 ```bash
-docker compose --profile cli run --rm backup-cli list
+docker compose run --rm backup-cli list
 ```
 
 If you see a table of archives (or an empty table with no error), the SSH connection is working.
@@ -106,13 +106,13 @@ If you see a table of archives (or an empty table with no error), the SSH connec
 
 | Mode | When to use |
 |------|-------------|
-| **Web** (`--profile web`) | Persistent service, scheduled backups, interactive management |
-| **CLI** (`--profile cli`) | Scripted/cron-triggered runs, one-shot backups, automation |
+| **Web** (`backup-web`) | Persistent service, scheduled backups, interactive management |
+| **CLI** (`backup-cli`) | Scripted/cron-triggered runs, one-shot backups, automation |
 
 Start the web service:
 
 ```bash
-docker compose --profile web up -d
+docker compose up -d backup-web
 ```
 
 Then open [http://localhost:5200](http://localhost:5200).

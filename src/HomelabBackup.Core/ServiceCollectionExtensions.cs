@@ -1,4 +1,5 @@
 using HomelabBackup.Core.Config;
+using HomelabBackup.Core.Data;
 using HomelabBackup.Core.Engines;
 using HomelabBackup.Core.Infrastructure;
 using HomelabBackup.Core.Services;
@@ -10,7 +11,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddHomelabBackupCore(this IServiceCollection services, BackupConfig config)
     {
-        // Config as singleton
+        // Config as singleton (refreshed in-place when UI saves)
         services.AddSingleton(config);
         services.AddSingleton(config.Ssh);
 
@@ -26,12 +27,9 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IRestoreEngine, RestoreEngine>();
         services.AddTransient<IRetentionPolicy, RetentionPolicy>();
 
-        // Scheduler (only if cron is configured)
-        if (config.Schedule?.Cron is not null)
-        {
-            services.AddSingleton<SchedulerService>();
-            services.AddHostedService(sp => sp.GetRequiredService<SchedulerService>());
-        }
+        // Scheduler — always registered; handles null cron by polling until one is configured
+        services.AddSingleton<SchedulerService>();
+        services.AddHostedService(sp => sp.GetRequiredService<SchedulerService>());
 
         return services;
     }

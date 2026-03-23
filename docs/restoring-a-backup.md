@@ -32,14 +32,14 @@ Then enter `/restore` as the destination in the modal.
 
 **Restore the latest backup for a source:**
 ```bash
-docker compose --profile cli run --rm backup-cli restore \
+docker compose run --rm backup-cli restore \
   --source media \
   --dest /restore
 ```
 
 **Restore a specific archive by filename:**
 ```bash
-docker compose --profile cli run --rm backup-cli restore \
+docker compose run --rm backup-cli restore \
   --file media_20250315_020000.zip \
   --dest /restore
 ```
@@ -48,7 +48,7 @@ Use `--source` when you want the most recent archive. Use `--file` when you need
 
 To find available archive filenames:
 ```bash
-docker compose --profile cli run --rm backup-cli list --source media
+docker compose run --rm backup-cli list --source media
 ```
 
 ## Choosing a destination path

@@ -26,14 +26,14 @@ You can also click **Dry Run** first to verify what will be included and how lar
 
 ```bash
 # Back up all sources
-docker compose --profile cli run --rm backup-cli backup
+docker compose run --rm backup-cli backup
 
 # Back up a single source
-docker compose --profile cli run --rm backup-cli backup --source media
+docker compose run --rm backup-cli backup --source media
 
 # Dry run (no upload)
-docker compose --profile cli run --rm backup-cli backup --dry-run
-docker compose --profile cli run --rm backup-cli backup --source configs --dry-run
+docker compose run --rm backup-cli backup --dry-run
+docker compose run --rm backup-cli backup --source configs --dry-run
 ```
 
 The CLI prints a summary table when the run completes:
@@ -71,10 +71,10 @@ Retention is not applied automatically after each backup. Run it manually when y
 
 ```bash
 # Preview what would be deleted (safe — default is dry run)
-docker compose --profile cli run --rm backup-cli retention
+docker compose run --rm backup-cli retention
 
 # Actually delete old archives
-docker compose --profile cli run --rm backup-cli retention --dry-run=false
+docker compose run --rm backup-cli retention --dry-run=false
 ```
 
 The retention policy is defined in `backup.yml`:
@@ -94,10 +94,10 @@ Both rules apply together: `keep_last` acts as a floor (even archives older than
 **CLI:**
 ```bash
 # List all archives
-docker compose --profile cli run --rm backup-cli list
+docker compose run --rm backup-cli list
 
 # Filter by source
-docker compose --profile cli run --rm backup-cli list --source media
+docker compose run --rm backup-cli list --source media
 ```
 
 Output:

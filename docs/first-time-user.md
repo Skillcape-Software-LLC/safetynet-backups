@@ -255,7 +255,7 @@ Before transferring any data, do a dry run to confirm everything looks right.
 
 **CLI:**
 ```bash
-docker compose --profile cli run --rm backup-cli backup --dry-run
+docker compose run --rm backup-cli backup --dry-run
 ```
 
 A dry run reports:
@@ -317,19 +317,19 @@ All CLI commands take the config path from the `CONFIG_PATH` environment variabl
 
 ```bash
 # List all archives on the remote server
-docker compose --profile cli run --rm backup-cli list
+docker compose run --rm backup-cli list
 
 # List archives for a single source
-docker compose --profile cli run --rm backup-cli list --source media
+docker compose run --rm backup-cli list --source media
 
 # Show what a backup would do without uploading
-docker compose --profile cli run --rm backup-cli backup --dry-run
+docker compose run --rm backup-cli backup --dry-run
 
 # Back up all sources
-docker compose --profile cli run --rm backup-cli backup
+docker compose run --rm backup-cli backup
 
 # Back up a single source
-docker compose --profile cli run --rm backup-cli backup --source configs
+docker compose run --rm backup-cli backup --source configs
 ```
 
 ---

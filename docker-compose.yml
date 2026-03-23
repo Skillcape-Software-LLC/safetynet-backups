@@ -2,33 +2,29 @@ services:
   backup-cli:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/cli:latest
     volumes:
-      - ./config:/config:ro
+      - ./data:/data          # SQLite database (shared with backup-web)
       - ./keys:/keys:ro
       - ./logs:/logs
-      # Add your data mounts here, e.g.:
-      # - /mnt/media:/data/media:ro
-      # - /home/chad/documents:/data/docs:ro
-      # - /opt/docker:/mnt/docker-volumes:ro   # set browse_root: /mnt/docker-volumes in backup.yml to enable source discovery
+      # To enable source discovery, mount your Docker volumes parent directory:
+      # - /opt/docker:/browse:ro
     environment:
-      - CONFIG_PATH=/config/backup.yml
+      - DB_PATH=/data/safetynet.db
       - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
-    profiles: [cli]
+      # - BROWSE_ROOT=/browse   # Uncomment together with the volume above
 
   backup-web:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/web:latest
     ports:
       - "5200:8080"
     volumes:
-      - ./config:/config      # rw — UI can edit config
+      - ./data:/data          # SQLite database (shared with backup-cli)
       - ./keys:/keys:ro
       - ./logs:/logs
-      # Add your data mounts here, e.g.:
-      # - /mnt/media:/data/media:ro
-      # - /home/chad/documents:/data/docs:ro
-      # - /opt/docker:/mnt/docker-volumes:ro   # set browse_root: /mnt/docker-volumes in backup.yml to enable source discovery
+      # To enable source discovery, mount your Docker volumes parent directory:
+      # - /opt/docker:/browse:ro
     environment:
-      - CONFIG_PATH=/config/backup.yml
+      - DB_PATH=/data/safetynet.db
       - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
+      # - BROWSE_ROOT=/browse   # Uncomment together with the volume above
       - ASPNETCORE_ENVIRONMENT=Production
     restart: unless-stopped
-    profiles: [web]

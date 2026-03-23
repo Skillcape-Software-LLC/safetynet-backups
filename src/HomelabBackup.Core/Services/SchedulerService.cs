@@ -42,15 +42,9 @@ public sealed class SchedulerService : IHostedService, IDisposable
 
     public Task StartAsync(CancellationToken cancellationToken)
     {
-        if (_config.Schedule?.Cron is null)
-        {
-            _logger.LogInformation("No schedule configured — running in one-shot mode");
-            return Task.CompletedTask;
-        }
-
         _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _runningTask = RunScheduleLoopAsync(_cts.Token);
-        _logger.LogInformation("Scheduler started with cron: {Cron}", _config.Schedule.Cron);
+        _logger.LogInformation("Scheduler started (cron: {Cron})", _config.Schedule?.Cron ?? "none");
         return Task.CompletedTask;
     }
 
@@ -72,15 +66,36 @@ public sealed class SchedulerService : IHostedService, IDisposable
 
     private async Task RunScheduleLoopAsync(CancellationToken ct)
     {
-        var cron = CronExpression.Parse(_config.Schedule!.Cron);
-
         while (!ct.IsCancellationRequested)
         {
-            var next = cron.GetNextOccurrence(DateTime.UtcNow);
+            var cron = _config.Schedule?.Cron;
+
+            // No cron configured — poll every 30 seconds waiting for one to be set via the UI
+            if (string.IsNullOrWhiteSpace(cron))
+            {
+                NextRunUtc = null;
+                await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                continue;
+            }
+
+            CronExpression cronExpr;
+            try
+            {
+                cronExpr = CronExpression.Parse(cron);
+            }
+            catch (CronFormatException ex)
+            {
+                _logger.LogWarning("Invalid cron expression '{Cron}': {Error} — retrying in 30s", cron, ex.Message);
+                await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+                continue;
+            }
+
+            var next = cronExpr.GetNextOccurrence(DateTime.UtcNow);
             if (next is null)
             {
-                _logger.LogWarning("No next occurrence found for cron expression");
-                break;
+                _logger.LogWarning("No next occurrence found for cron '{Cron}' — retrying in 60s", cron);
+                await Task.Delay(TimeSpan.FromMinutes(1), ct).ConfigureAwait(false);
+                continue;
             }
 
             NextRunUtc = next;
@@ -88,11 +103,15 @@ public sealed class SchedulerService : IHostedService, IDisposable
             if (delay > TimeSpan.Zero)
             {
                 _logger.LogInformation("Next backup scheduled at {NextRun} UTC (in {Delay})", next, delay);
-                await Task.Delay(delay, ct);
+                await Task.Delay(delay, ct).ConfigureAwait(false);
             }
 
             if (ct.IsCancellationRequested)
                 break;
+
+            // Re-check cron in case it was cleared while we waited
+            if (string.IsNullOrWhiteSpace(_config.Schedule?.Cron))
+                continue;
 
             _logger.LogInformation("Scheduled backup starting...");
 
