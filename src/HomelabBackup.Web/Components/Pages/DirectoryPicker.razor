@@ -1,0 +1,168 @@
+@rendermode InteractiveServer
+
+@if (_isOpen)
+{
+    <div class="modal-backdrop fade show"></div>
+
+    <div class="modal fade show d-block" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-folder2-open me-2"></i>Browse Directory
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <nav aria-label="breadcrumb" class="mb-3">
+                        <ol class="breadcrumb mb-0">
+                            @foreach (var seg in GetBreadcrumbs())
+                            {
+                                if (seg.FullPath == _currentPath)
+                                {
+                                    <li class="breadcrumb-item active">@seg.Label</li>
+                                }
+                                else
+                                {
+                                    var path = seg.FullPath;
+                                    <li class="breadcrumb-item">
+                                        <button class="btn btn-link p-0 align-baseline" @onclick="() => NavigateTo(path)">@seg.Label</button>
+                                    </li>
+                                }
+                            }
+                        </ol>
+                    </nav>
+
+                    @if (_browseError is not null)
+                    {
+                        <div class="alert alert-warning py-2 mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>@_browseError
+                        </div>
+                    }
+                    else if (!_subdirs.Any())
+                    {
+                        <div class="text-secondary py-2">
+                            <i class="bi bi-folder-x me-1"></i>No subdirectories in this folder.
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush">
+                            @foreach (var dir in _subdirs)
+                            {
+                                var d = dir;
+                                <li class="list-group-item list-group-item-action px-2 py-2"
+                                    style="cursor:pointer"
+                                    @onclick="() => NavigateTo(d)">
+                                    <i class="bi bi-folder me-2 text-warning"></i>
+                                    @Path.GetFileName(d)
+                                </li>
+                            }
+                        </ul>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <small class="text-secondary me-auto text-truncate" style="max-width: 60%;">@_currentPath</small>
+                    <button class="btn btn-outline-secondary" @onclick="Close">Cancel</button>
+                    <button class="btn btn-accent" @onclick="SelectCurrentFolder">
+                        <i class="bi bi-check-lg me-1"></i>Select This Folder
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string? BrowseRoot { get; set; }
+    [Parameter] public EventCallback<string> OnPicked { get; set; }
+
+    private bool _isOpen;
+    private string _currentPath = "/";
+    private List<string> _subdirs = [];
+    private string? _browseError;
+
+    public void Open()
+    {
+        _currentPath = string.IsNullOrWhiteSpace(BrowseRoot) ? "/" : BrowseRoot;
+        _browseError = null;
+        _isOpen = true;
+        NavigateTo(_currentPath);
+        StateHasChanged();
+    }
+
+    public void Close()
+    {
+        _isOpen = false;
+        StateHasChanged();
+    }
+
+    private void NavigateTo(string path)
+    {
+        _browseError = null;
+        _subdirs = [];
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(BrowseRoot))
+            {
+                var ceiling = Path.GetFullPath(BrowseRoot);
+                var target = Path.GetFullPath(path);
+                if (!target.StartsWith(ceiling, StringComparison.OrdinalIgnoreCase))
+                {
+                    _browseError = $"Navigation is restricted to '{BrowseRoot}'";
+                    return;
+                }
+            }
+
+            _currentPath = path;
+            _subdirs = Directory
+                .GetDirectories(path)
+                .OrderBy(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _browseError = "Permission denied — cannot read this directory.";
+        }
+        catch (DirectoryNotFoundException)
+        {
+            _browseError = "Directory not found.";
+        }
+        catch (Exception ex)
+        {
+            _browseError = $"Error: {ex.Message}";
+        }
+    }
+
+    private List<(string Label, string FullPath)> GetBreadcrumbs()
+    {
+        var current = Path.GetFullPath(_currentPath);
+        var parts = current.Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        var segments = new List<(string Label, string FullPath)> { ("/", "/") };
+        var accumulated = "";
+        foreach (var part in parts)
+        {
+            accumulated += "/" + part;
+            segments.Add((part, accumulated));
+        }
+
+        if (!string.IsNullOrWhiteSpace(BrowseRoot))
+        {
+            var ceiling = Path.GetFullPath(BrowseRoot);
+            segments = segments
+                .Where(s => Path.GetFullPath(s.FullPath)
+                    .StartsWith(ceiling, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+
+        return segments;
+    }
+
+    private async Task SelectCurrentFolder()
+    {
+        _isOpen = false;
+        await OnPicked.InvokeAsync(_currentPath);
+    }
+}

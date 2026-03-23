@@ -153,7 +153,12 @@
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Path</label>
-                            <input type="text" class="form-control" @bind="_sources[idx].Path" />
+                            <div class="input-group">
+                                <input type="text" class="form-control" @bind="_sources[idx].Path" />
+                                <button class="btn btn-outline-secondary" type="button" @onclick="() => OpenPicker(idx)" title="Browse directories">
+                                    <i class="bi bi-folder2-open"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Exclude (comma-separated)</label>
@@ -186,6 +191,8 @@
     </button>
 </div>
 
+<DirectoryPicker @ref="_picker" BrowseRoot="@_browseRoot" OnPicked="HandlePathPicked" />
+
 @if (_showDiff)
 {
     <div class="content-card mt-4">
@@ -209,6 +216,8 @@
 }
 
 @code {
+    private DirectoryPicker _picker = default!;
+    private int _pickerTargetIdx;
     private SshConfig _ssh = new();
     private string _destPath = "";
     private int _keepLast;
@@ -278,6 +287,17 @@
             _sources.Add(new SourceConfig { Name = name, Path = fullPath });
         else if (!selected)
             _sources.RemoveAll(s => s.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void OpenPicker(int idx)
+    {
+        _pickerTargetIdx = idx;
+        _picker.Open();
+    }
+
+    private void HandlePathPicked(string path)
+    {
+        _sources[_pickerTargetIdx].Path = path;
     }
 
     private void AddSource()
