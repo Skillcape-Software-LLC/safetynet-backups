@@ -11,27 +11,33 @@ public static class ConfigLoader
     public static BackupConfig Load(string path)
     {
         if (!File.Exists(path))
-            throw new ConfigurationException($"Configuration file not found: {path}");
+        {
+            var defaultConfig = new BackupConfig();
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+            File.WriteAllText(path, Serialize(defaultConfig));
+            return defaultConfig;
+        }
 
         var yaml = File.ReadAllText(path);
+
+        if (string.IsNullOrWhiteSpace(yaml))
+            return new BackupConfig();
+
         var deserializer = new DeserializerBuilder()
             .WithNamingConvention(UnderscoredNamingConvention.Instance)
             .IgnoreUnmatchedProperties()
             .Build();
 
-        BackupConfig config;
         try
         {
-            config = deserializer.Deserialize<BackupConfig>(yaml)
-                ?? throw new ConfigurationException("Configuration file is empty or invalid.");
+            return deserializer.Deserialize<BackupConfig>(yaml) ?? new BackupConfig();
         }
         catch (Exception ex) when (ex is not ConfigurationException)
         {
             throw new ConfigurationException($"Failed to parse configuration: {ex.Message}", ex);
         }
-
-        Validate(config);
-        return config;
     }
 
     public static void Validate(BackupConfig config)

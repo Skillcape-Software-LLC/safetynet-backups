@@ -1,13 +1,13 @@
 services:
   backup-cli:
-    build:
-      context: .
-      dockerfile: src/HomelabBackup.Cli/Dockerfile
+    image: ghcr.io/skillcape-software-llc/safetynet-backups/cli:latest
     volumes:
       - ./config:/config:ro
       - ./keys:/keys:ro
-      - /host/data:/data:ro
       - ./logs:/logs
+      # Add your data mounts here, e.g.:
+      # - /mnt/media:/data/media:ro
+      # - /home/chad/documents:/data/docs:ro
       # - /opt/docker:/mnt/docker-volumes:ro   # set browse_root: /mnt/docker-volumes in backup.yml to enable source discovery
     environment:
       - CONFIG_PATH=/config/backup.yml
@@ -15,16 +15,16 @@ services:
     profiles: [cli]
 
   backup-web:
-    build:
-      context: .
-      dockerfile: src/HomelabBackup.Web/Dockerfile
+    image: ghcr.io/skillcape-software-llc/safetynet-backups/web:latest
     ports:
       - "5200:8080"
     volumes:
       - ./config:/config      # rw — UI can edit config
       - ./keys:/keys:ro
-      - /host/data:/data:ro
       - ./logs:/logs
+      # Add your data mounts here, e.g.:
+      # - /mnt/media:/data/media:ro
+      # - /home/chad/documents:/data/docs:ro
       # - /opt/docker:/mnt/docker-volumes:ro   # set browse_root: /mnt/docker-volumes in backup.yml to enable source discovery
     environment:
       - CONFIG_PATH=/config/backup.yml
