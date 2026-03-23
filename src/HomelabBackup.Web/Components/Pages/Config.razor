@@ -2,7 +2,9 @@
 @rendermode InteractiveServer
 @inject BackupConfig CurrentConfig
 @inject HomelabBackup.Web.Services.ConfigService ConfigService
+@inject ILoggerFactory LoggerFactory
 @using HomelabBackup.Core.Config
+@using HomelabBackup.Core.Infrastructure
 
 <PageTitle>Config - HomelabBackup</PageTitle>
 
@@ -48,6 +50,9 @@
                     <label class="form-label">Key Path</label>
                     <input type="text" class="form-control" @bind="_ssh.KeyPath" />
                 </div>
+                <button class="btn btn-outline-secondary w-100 mt-1" @onclick="TestConnection" disabled="@_testRunning">
+                    <i class="bi bi-plug me-1"></i>@(_testRunning ? "Testing..." : "Test Connection")
+                </button>
             </div>
         </div>
     </div>
@@ -110,13 +115,36 @@
     <!-- Sources -->
     <div class="col-12">
         <div class="content-card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-folder-plus me-2"></i>Sources</span>
-                <button class="btn btn-sm btn-accent" @onclick="AddSource">
-                    <i class="bi bi-plus-lg me-1"></i>Add Source
-                </button>
+            <div class="card-header">
+                <i class="bi bi-folder-plus me-2"></i>Sources
             </div>
             <div class="card-body">
+                @if (_dockerDirs.Count > 0)
+                {
+                    <div class="mb-3 pb-3 border-bottom">
+                        <div class="fw-semibold mb-2 text-secondary small">
+                            <i class="bi bi-database me-1"></i>Docker Volumes
+                        </div>
+                        @foreach (var dir in _dockerDirs)
+                        {
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox"
+                                       checked="@IsDiscoveredSourceSelected(dir.FullPath)"
+                                       @onchange="e => ToggleDiscoveredSource(dir.Name, dir.FullPath, (bool)e.Value!)" />
+                                <label class="form-check-label">
+                                    <span class="fw-medium">@dir.Name</span>
+                                    <span class="text-secondary ms-2" style="font-size: 0.85em">@dir.FullPath</span>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                }
+                @if (_dockerDirError is not null)
+                {
+                    <div class="alert alert-warning py-2 mb-3">
+                        <i class="bi bi-exclamation-triangle me-1"></i>@_dockerDirError
+                    </div>
+                }
                 @if (_discoveredDirs.Count > 0)
                 {
                     <div class="mb-3 pb-3 border-bottom">
@@ -143,34 +171,10 @@
                         <i class="bi bi-exclamation-triangle me-1"></i>@_browseError
                     </div>
                 }
-                @for (int i = 0; i < _sources.Count; i++)
+                @if (_dockerDirs.Count == 0 && _discoveredDirs.Count == 0 && _dockerDirError is null && _browseError is null)
                 {
-                    var idx = i;
-                    <div class="row align-items-end mb-3 pb-3 @(idx < _sources.Count - 1 ? "border-bottom" : "")">
-                        <div class="col-md-3">
-                            <label class="form-label">Name</label>
-                            <input type="text" class="form-control" @bind="_sources[idx].Name" />
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Path</label>
-                            <div class="input-group">
-                                <input type="text" class="form-control" @bind="_sources[idx].Path" />
-                                <button class="btn btn-outline-secondary" type="button" @onclick="() => OpenPicker(idx)" title="Browse directories">
-                                    <i class="bi bi-folder2-open"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">Exclude (comma-separated)</label>
-                            <input type="text" class="form-control"
-                                   value="@string.Join(", ", _sources[idx].Exclude)"
-                                   @onchange="e => UpdateExclude(idx, e.Value?.ToString())" />
-                        </div>
-                        <div class="col-md-1 text-end">
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveSource(idx)">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </div>
+                    <div class="text-secondary py-2">
+                        <i class="bi bi-folder-x me-1"></i>No sources discovered. Ensure Docker volumes are accessible or set a custom Source Discovery Folder.
                     </div>
                 }
             </div>
@@ -190,8 +194,6 @@
         <i class="bi bi-save me-1"></i>Save
     </button>
 </div>
-
-<DirectoryPicker @ref="_picker" BrowseRoot="@_browseRoot" OnPicked="HandlePathPicked" />
 
 @if (_showDiff)
 {
@@ -215,9 +217,21 @@
     </div>
 }
 
+@if (_showTestOffcanvas)
+{
+    <div class="offcanvas-backdrop fade show" @onclick="() => _showTestOffcanvas = false"></div>
+    <div class="offcanvas offcanvas-end show" style="visibility:visible; width:460px">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title"><i class="bi bi-terminal me-2"></i>Connection Test</h5>
+            <button class="btn-close" @onclick="() => _showTestOffcanvas = false"></button>
+        </div>
+        <div class="offcanvas-body">
+            <pre style="font-size:0.8rem; white-space:pre-wrap; margin:0">@string.Join("\n", _testLogs)</pre>
+        </div>
+    </div>
+}
+
 @code {
-    private DirectoryPicker _picker = default!;
-    private int _pickerTargetIdx;
     private SshConfig _ssh = new();
     private string _destPath = "";
     private int _keepLast;
@@ -225,6 +239,9 @@
     private string _compression = "optimal";
     private string _cron = "";
     private string _browseRoot = "";
+    private const string DefaultDockerPath = "/docker-volumes";
+    private List<(string Name, string FullPath)> _dockerDirs = [];
+    private string? _dockerDirError;
     private List<(string Name, string FullPath)> _discoveredDirs = [];
     private string? _browseError;
     private List<SourceConfig> _sources = [];
@@ -233,6 +250,9 @@
     private bool _showDiff;
     private string _currentYaml = "";
     private string _pendingYaml = "";
+    private bool _testRunning;
+    private bool _showTestOffcanvas;
+    private List<string> _testLogs = [];
 
     protected override void OnInitialized()
     {
@@ -261,10 +281,26 @@
 
     private void RefreshDiscovery()
     {
+        // Default Docker named volumes (always scanned)
+        _dockerDirs = [];
+        _dockerDirError = null;
+        try
+        {
+            if (Directory.Exists(DefaultDockerPath))
+                _dockerDirs = Directory.GetDirectories(DefaultDockerPath)
+                    .Select(p => (Name: Path.GetFileName(p)!, FullPath: p))
+                    .OrderBy(d => d.Name)
+                    .ToList();
+        }
+        catch (Exception ex)
+        {
+            _dockerDirError = $"Cannot read '{DefaultDockerPath}': {ex.Message}";
+        }
+
+        // Custom BrowseRoot (optional)
         _discoveredDirs = [];
         _browseError = null;
         if (string.IsNullOrWhiteSpace(_browseRoot)) return;
-
         try
         {
             _discoveredDirs = Directory.GetDirectories(_browseRoot)
@@ -289,33 +325,64 @@
             _sources.RemoveAll(s => s.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
     }
 
-    private void OpenPicker(int idx)
+    private async Task TestConnection()
     {
-        _pickerTargetIdx = idx;
-        _picker.Open();
-    }
+        _testLogs = [];
+        _testRunning = true;
+        _showTestOffcanvas = true;
+        StateHasChanged();
 
-    private void HandlePathPicked(string path)
-    {
-        _sources[_pickerTargetIdx].Path = path;
-    }
+        var sshConfig = new SshConfig
+        {
+            Host = _ssh.Host,
+            Port = _ssh.Port,
+            User = _ssh.User,
+            KeyPath = _ssh.KeyPath
+        };
 
-    private void AddSource()
-    {
-        _sources.Add(new SourceConfig());
-    }
+        string? localTmp = null;
+        var sftp = new SftpService(sshConfig, LoggerFactory.CreateLogger<SftpService>());
 
-    private void RemoveSource(int idx)
-    {
-        if (idx >= 0 && idx < _sources.Count)
-            _sources.RemoveAt(idx);
-    }
+        void Log(string msg)
+        {
+            _testLogs.Add($"[{DateTime.Now:HH:mm:ss}] {msg}");
+            StateHasChanged();
+        }
 
-    private void UpdateExclude(int idx, string? value)
-    {
-        _sources[idx].Exclude = (value ?? "")
-            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .ToList();
+        try
+        {
+            Log($"Connecting to {sshConfig.Host}:{sshConfig.Port} as {sshConfig.User}...");
+            await sftp.ConnectAsync();
+            Log("Connected.");
+
+            var remotePath = $"{_destPath.TrimEnd('/')}/safetynet-test-{Guid.NewGuid():N}.tmp";
+            localTmp = Path.GetTempFileName();
+            await File.WriteAllTextAsync(localTmp, "safetynet connection test");
+
+            Log($"Creating temp file at {remotePath}...");
+            await sftp.UploadAsync(localTmp, remotePath);
+            Log("Temp file created.");
+
+            Log("Deleting temp file...");
+            await sftp.DeleteAsync(remotePath);
+            Log("Temp file deleted.");
+
+            Log("Disconnecting...");
+            await sftp.DisconnectAsync();
+            Log("Done. Connection test passed.");
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR: {ex.Message}");
+        }
+        finally
+        {
+            if (localTmp is not null && File.Exists(localTmp))
+                File.Delete(localTmp);
+            await sftp.DisposeAsync();
+            _testRunning = false;
+            StateHasChanged();
+        }
     }
 
     private BackupConfig BuildConfig() => new()

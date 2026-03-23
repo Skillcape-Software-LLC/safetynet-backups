@@ -1,12 +1,15 @@
 services:
   backup-cli:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/cli:latest
+    user: "${PUID:-1000}:${PGID:-1000}"
     volumes:
       - safetynet_data:/data  # SQLite database (shared with backup-web)
       - ./keys:/keys:ro
       - ./logs:/logs
-      # To enable source discovery, mount your Docker volumes parent directory:
-      - ~/docker:/browse:ro
+      # Default Docker named volumes (always mounted, no config needed)
+      - /var/lib/docker/volumes:/docker-volumes:ro
+      # Set DOCKER_DIR in .env to an optional custom directory (e.g. docker project folders)
+      - ${DOCKER_DIR:-/tmp}:/browse:ro
     environment:
       - DB_PATH=/data/safetynet.db
       - BACKUP_KEY_PASSPHRASE=ociH00713!
@@ -14,14 +17,17 @@ services:
 
   backup-web:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/web:latest
+    user: "${PUID:-1000}:${PGID:-1000}"
     ports:
       - "5200:8080"
     volumes:
       - safetynet_data:/data  # SQLite database (shared with backup-cli)
       - ./keys:/keys:ro
       - ./logs:/logs
-      # To enable source discovery, mount your Docker volumes parent directory:
-      - ~/docker:/browse:ro
+      # Default Docker named volumes (always mounted, no config needed)
+      - /var/lib/docker/volumes:/docker-volumes:ro
+      # Set DOCKER_DIR in .env to an optional custom directory (e.g. docker project folders)
+      - ${DOCKER_DIR:-/tmp}:/browse:ro
     environment:
       - DB_PATH=/data/safetynet.db
       - BACKUP_KEY_PASSPHRASE=ociH00713!
