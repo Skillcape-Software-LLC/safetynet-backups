@@ -94,14 +94,14 @@ else
                 </div>
                 <div class="modal-body">
                     <p>Restoring: <code>@_restoreTarget.ArchiveFileName</code></p>
-                    <div class="mb-3">
-                        <label class="form-label">Destination Path</label>
-                        <input type="text" class="form-control" @bind="_restoreDest" placeholder="/restore/path" />
-                    </div>
+                    <p class="mb-0 text-secondary">
+                        <i class="bi bi-folder-check me-1"></i>
+                        Files will be written to <strong>@_restoreTarget.SourceName</strong> inside your configured restore directory.
+                    </p>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => _restoreTarget = null">Cancel</button>
-                    <button class="btn btn-accent" @onclick="ExecuteRestore" disabled="@string.IsNullOrWhiteSpace(_restoreDest)">
+                    <button class="btn btn-accent" @onclick="ExecuteRestore">
                         <i class="bi bi-download me-1"></i>Restore
                     </button>
                 </div>
@@ -198,7 +198,7 @@ else
     private void ShowRestoreDialog(BackupEntry archive)
     {
         _restoreTarget = archive;
-        _restoreDest = archive.SourcePath ?? "";
+        _restoreDest = $"/restores/{archive.SourceName}";
     }
 
     private void ConfirmDelete(BackupEntry archive) => _deleteTarget = archive;
@@ -208,7 +208,7 @@ else
         if (_restoreTarget is null || string.IsNullOrWhiteSpace(_restoreDest)) return;
         var (_, queued) = JobQueue.EnqueueRestore(_restoreTarget.ArchiveFileName, _restoreDest);
         if (queued)
-            Toast.Show("Restore Queued", $"Restoring {_restoreTarget.ArchiveFileName} to {_restoreDest}", Toast.ToastType.Info);
+            Toast.Show("Restore Queued", $"Restoring {_restoreTarget.ArchiveFileName}", Toast.ToastType.Info);
         else
             Toast.Show("Queue Full", "Job queue is full. Please wait for current jobs to finish.", Toast.ToastType.Warning);
         _restoreTarget = null;

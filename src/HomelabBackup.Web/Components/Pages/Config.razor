@@ -133,7 +133,6 @@
                                        @onchange="e => ToggleDiscoveredSource(dir.Name, dir.FullPath, (bool)e.Value!)" />
                                 <label class="form-check-label">
                                     <span class="fw-medium">@dir.Name</span>
-                                    <span class="text-secondary ms-2" style="font-size: 0.85em">@dir.FullPath</span>
                                 </label>
                             </div>
                         }
@@ -149,7 +148,7 @@
                 {
                     <div class="mb-3 pb-3 border-bottom">
                         <div class="fw-semibold mb-2 text-secondary small">
-                            <i class="bi bi-folder2-open me-1"></i>Discovered in @_browseRoot
+                            <i class="bi bi-folder2-open me-1"></i>Source Discovery Folder
                         </div>
                         @foreach (var dir in _discoveredDirs)
                         {
@@ -159,7 +158,6 @@
                                        @onchange="e => ToggleDiscoveredSource(dir.Name, dir.FullPath, (bool)e.Value!)" />
                                 <label class="form-check-label">
                                     <span class="fw-medium">@dir.Name</span>
-                                    <span class="text-secondary ms-2" style="font-size: 0.85em">@dir.FullPath</span>
                                 </label>
                             </div>
                         }
