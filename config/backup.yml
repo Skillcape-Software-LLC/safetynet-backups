@@ -24,3 +24,5 @@ compression: optimal                 # optimal | fastest | no_compression
 
 schedule:
   cron: "0 2 * * *"                  # null = one-shot mode
+
+# browse_root: /mnt/docker-volumes   # optional: mount a parent folder and select subdirs as sources from the UI

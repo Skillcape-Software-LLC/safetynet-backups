@@ -26,6 +26,12 @@ public static class BackupCommand
             var config = services.GetRequiredService<BackupConfig>();
             var engine = services.GetRequiredService<IBackupEngine>();
 
+            if (config.Sources.Count == 0)
+            {
+                Console.Error.WriteLine("No sources configured. Add sources in backup.yml or via the Config page.");
+                return;
+            }
+
             var sources = config.Sources.AsEnumerable();
             if (source is not null)
             {
@@ -52,7 +58,8 @@ public static class BackupCommand
                 Console.Write($"\r  [{evt.Source}] {phase}: {evt.CurrentFile,-60}");
             });
 
-            foreach (var s in sources.ToList())
+            var sourceList = sources.ToList();
+            foreach (var s in sourceList)
             {
                 Console.WriteLine($"\nBacking up: {s.Name} ({s.Path})");
                 var result = await engine.RunAsync(s, config.Destination, config.Compression, dryRun, progress, ct);
@@ -71,6 +78,15 @@ public static class BackupCommand
                 {
                     Console.Error.WriteLine($"  FAILED: {result.ErrorMessage}");
                 }
+            }
+
+            if (!dryRun)
+            {
+                Console.WriteLine("\nApplying retention policy...");
+                var policy = services.GetRequiredService<IRetentionPolicy>();
+                var sourceNames = sourceList.Select(s => s.Name).ToList();
+                var retentionResult = await policy.ApplyAsync(config.Destination, config.Retention, sourceNames, dryRun: false, ct);
+                Console.WriteLine($"  Retention: {retentionResult.DeletedArchives.Count} deleted, {retentionResult.RetainedArchives.Count} retained");
             }
         });
 

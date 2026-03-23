@@ -21,6 +21,9 @@ public class BackupConfig
 
     [YamlMember(Alias = "schedule")]
     public ScheduleConfig? Schedule { get; set; }
+
+    [YamlMember(Alias = "browse_root")]
+    public string? BrowseRoot { get; set; }
 }
 
 public class SshConfig

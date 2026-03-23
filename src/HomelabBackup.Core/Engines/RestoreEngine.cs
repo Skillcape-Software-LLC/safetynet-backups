@@ -29,7 +29,8 @@ public sealed class RestoreEngine : IRestoreEngine
     public async Task<BackupResult> RestoreLatestAsync(
         string sourceName,
         DestinationConfig remoteDestination,
-        string localDestination,
+        string? localDestination = null,
+        IProgress<long>? progress = null,
         CancellationToken ct = default)
     {
         try
@@ -45,7 +46,6 @@ public sealed class RestoreEngine : IRestoreEngine
             if (manifests.Count == 0)
                 throw new InvalidOperationException($"No backups found for source '{sourceName}'");
 
-            // Read the latest manifest to get the archive filename
             using var manifestStream = new MemoryStream();
             await _sftp.DownloadToStreamAsync(manifests[0].FullPath, manifestStream, ct);
             manifestStream.Position = 0;
@@ -53,7 +53,8 @@ public sealed class RestoreEngine : IRestoreEngine
 
             await _sftp.DisconnectAsync();
 
-            return await RestoreFileAsync(manifest.ArchiveFileName, remoteDestination, localDestination, ct);
+            var destination = localDestination ?? manifest.SourcePath;
+            return await RestoreFileAsync(manifest.ArchiveFileName, remoteDestination, destination, progress, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -65,44 +66,63 @@ public sealed class RestoreEngine : IRestoreEngine
     public async Task<BackupResult> RestoreFileAsync(
         string archiveFileName,
         DestinationConfig remoteDestination,
-        string localDestination,
+        string? localDestination = null,
+        IProgress<long>? progress = null,
         CancellationToken ct = default)
     {
-        // Validate destination path
-        var canonicalDest = Path.GetFullPath(localDestination);
-        if (string.IsNullOrWhiteSpace(canonicalDest))
-            throw new ArgumentException("Restore destination path cannot be empty.");
-
         // Validate archive filename doesn't contain path traversal
         if (archiveFileName.Contains("..") || Path.IsPathRooted(archiveFileName))
             throw new ArgumentException($"Invalid archive filename: {archiveFileName}");
-
-        var stopwatch = Stopwatch.StartNew();
-        var tempDir = Path.Combine(Path.GetTempPath(), "homelabbackup", Guid.NewGuid().ToString("N"));
-        var tempZipPath = Path.Combine(tempDir, archiveFileName);
 
         // Infer source name from archive filename (format: sourceName_yyyyMMdd_HHmmss.zip)
         var sourceName = archiveFileName.Split('_')[0];
         var remoteDir = $"{remoteDestination.Path}/{sourceName}";
         var remoteZipPath = $"{remoteDir}/{archiveFileName}";
 
+        // If no destination provided, read manifest to get the original source path
+        if (string.IsNullOrWhiteSpace(localDestination))
+        {
+            try
+            {
+                await _sftp.ConnectAsync(ct);
+                var manifestPath = $"{remoteDir}/{_manifest.GetManifestFileName(archiveFileName)}";
+                using var manifestStream = new MemoryStream();
+                await _sftp.DownloadToStreamAsync(manifestPath, manifestStream, ct);
+                manifestStream.Position = 0;
+                var manifest = await _manifest.ReadFromStreamAsync(manifestStream, ct);
+                localDestination = manifest.SourcePath;
+                await _sftp.DisconnectAsync();
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                await _sftp.DisconnectAsync();
+                throw new InvalidOperationException(
+                    $"Could not determine restore destination: manifest not found for '{archiveFileName}'. Specify --dest explicitly.", ex);
+            }
+        }
+
+        var canonicalDest = Path.GetFullPath(localDestination);
+        var stopwatch = Stopwatch.StartNew();
+        var tempDir = Path.Combine(Path.GetTempPath(), "homelabbackup", Guid.NewGuid().ToString("N"));
+        var tempZipPath = Path.Combine(tempDir, archiveFileName);
+
         try
         {
             Directory.CreateDirectory(tempDir);
 
-            _logger.LogInformation("Restoring {ArchiveFileName} to {Destination}", archiveFileName, localDestination);
+            _logger.LogInformation("Restoring {ArchiveFileName} to {Destination}", archiveFileName, canonicalDest);
 
             await _sftp.ConnectAsync(ct);
-            await _sftp.DownloadAsync(remoteZipPath, tempZipPath, null, ct);
+            await _sftp.DownloadAsync(remoteZipPath, tempZipPath, progress, ct);
             await _sftp.DisconnectAsync();
 
-            await _archive.ExtractArchiveAsync(tempZipPath, localDestination, ct);
+            await _archive.ExtractArchiveAsync(tempZipPath, canonicalDest, ct);
 
             stopwatch.Stop();
 
             var zipInfo = new FileInfo(tempZipPath);
             _logger.LogInformation("Restore complete: {ArchiveFileName} → {Destination} ({Duration})",
-                archiveFileName, localDestination, stopwatch.Elapsed);
+                archiveFileName, canonicalDest, stopwatch.Elapsed);
 
             return new BackupResult(
                 Success: true,

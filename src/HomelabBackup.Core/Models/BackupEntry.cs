@@ -5,4 +5,5 @@ public record BackupEntry(
     string ArchiveFileName,
     DateTime CreatedUtc,
     long CompressedBytes,
-    int FileCount = 0);
+    int FileCount = 0,
+    string? SourcePath = null);

@@ -26,19 +26,21 @@ public static class ListCommand
             var sftp = services.GetRequiredService<ISftpService>();
             var manifestService = services.GetRequiredService<IManifestService>();
 
-            var sourceNames = config.Sources.Select(s => s.Name).ToList();
+            await sftp.ConnectAsync(ct);
+
+            var sourceNames = await sftp.ListSubdirectoriesAsync(config.Destination.Path, ct);
+
             if (source is not null)
                 sourceNames = sourceNames.Where(s => s.Equals(source, StringComparison.OrdinalIgnoreCase)).ToList();
 
             if (sourceNames.Count == 0)
             {
-                Console.Error.WriteLine(source is not null
-                    ? $"Source '{source}' not found."
-                    : "No sources configured.");
+                Console.WriteLine(source is not null
+                    ? $"No archives found for source '{source}'."
+                    : "No archives found on remote. Run a backup first.");
+                await sftp.DisconnectAsync();
                 return;
             }
-
-            await sftp.ConnectAsync(ct);
 
             var entries = new List<BackupEntry>();
 

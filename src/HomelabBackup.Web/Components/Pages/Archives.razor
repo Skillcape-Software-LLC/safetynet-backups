@@ -159,9 +159,11 @@ else
         {
             await Sftp.ConnectAsync();
 
-            foreach (var source in Config.Sources)
+            var sourceNames = await Sftp.ListSubdirectoriesAsync(Config.Destination.Path);
+
+            foreach (var sourceName in sourceNames)
             {
-                var remoteDir = $"{Config.Destination.Path}/{source.Name}";
+                var remoteDir = $"{Config.Destination.Path}/{sourceName}";
                 try
                 {
                     var files = await Sftp.ListDirectoryAsync(remoteDir);
@@ -173,9 +175,9 @@ else
                         var manifest = await ManifestService.ReadFromStreamAsync(stream);
 
                         _archives.Add(new BackupEntry(
-                            source.Name, manifest.ArchiveFileName,
+                            sourceName, manifest.ArchiveFileName,
                             manifest.CreatedUtc, manifest.CompressedBytes,
-                            manifest.Files.Count));
+                            manifest.Files.Count, manifest.SourcePath));
                     }
                 }
                 catch { /* source dir may not exist yet */ }
@@ -196,7 +198,7 @@ else
     private void ShowRestoreDialog(BackupEntry archive)
     {
         _restoreTarget = archive;
-        _restoreDest = "";
+        _restoreDest = archive.SourcePath ?? "";
     }
 
     private void ConfirmDelete(BackupEntry archive) => _deleteTarget = archive;

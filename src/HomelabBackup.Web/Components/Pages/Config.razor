@@ -95,6 +95,13 @@
                     <input type="text" class="form-control" @bind="_cron" placeholder='e.g. "0 2 * * *" or leave empty' />
                     <div class="form-text">Leave empty for one-shot mode</div>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label">Source Discovery Folder</label>
+                    <input type="text" class="form-control"
+                           @bind="_browseRoot" @bind:after="RefreshDiscovery"
+                           placeholder="/mnt/docker-volumes (optional)" />
+                    <div class="form-text">Mount a parent folder to browse and select subdirectories as sources</div>
+                </div>
             </div>
         </div>
     </div>
@@ -109,6 +116,32 @@
                 </button>
             </div>
             <div class="card-body">
+                @if (_discoveredDirs.Count > 0)
+                {
+                    <div class="mb-3 pb-3 border-bottom">
+                        <div class="fw-semibold mb-2 text-secondary small">
+                            <i class="bi bi-folder2-open me-1"></i>Discovered in @_browseRoot
+                        </div>
+                        @foreach (var dir in _discoveredDirs)
+                        {
+                            <div class="form-check mb-1">
+                                <input class="form-check-input" type="checkbox"
+                                       checked="@IsDiscoveredSourceSelected(dir.FullPath)"
+                                       @onchange="e => ToggleDiscoveredSource(dir.Name, dir.FullPath, (bool)e.Value!)" />
+                                <label class="form-check-label">
+                                    <span class="fw-medium">@dir.Name</span>
+                                    <span class="text-secondary ms-2" style="font-size: 0.85em">@dir.FullPath</span>
+                                </label>
+                            </div>
+                        }
+                    </div>
+                }
+                @if (_browseError is not null)
+                {
+                    <div class="alert alert-warning py-2 mb-3">
+                        <i class="bi bi-exclamation-triangle me-1"></i>@_browseError
+                    </div>
+                }
                 @for (int i = 0; i < _sources.Count; i++)
                 {
                     var idx = i;
@@ -181,6 +214,9 @@
     private int _maxAgeDays;
     private string _compression = "optimal";
     private string _cron = "";
+    private string _browseRoot = "";
+    private List<(string Name, string FullPath)> _discoveredDirs = [];
+    private string? _browseError;
     private List<SourceConfig> _sources = [];
     private bool _saved;
     private string? _error;
@@ -203,12 +239,44 @@
         _maxAgeDays = CurrentConfig.Retention.MaxAgeDays;
         _compression = CurrentConfig.Compression;
         _cron = CurrentConfig.Schedule?.Cron ?? "";
+        _browseRoot = CurrentConfig.BrowseRoot ?? "";
         _sources = CurrentConfig.Sources.Select(s => new SourceConfig
         {
             Name = s.Name,
             Path = s.Path,
             Exclude = new List<string>(s.Exclude)
         }).ToList();
+        RefreshDiscovery();
+    }
+
+    private void RefreshDiscovery()
+    {
+        _discoveredDirs = [];
+        _browseError = null;
+        if (string.IsNullOrWhiteSpace(_browseRoot)) return;
+
+        try
+        {
+            _discoveredDirs = Directory.GetDirectories(_browseRoot)
+                .Select(p => (Name: Path.GetFileName(p)!, FullPath: p))
+                .OrderBy(d => d.Name)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _browseError = $"Cannot read '{_browseRoot}': {ex.Message}";
+        }
+    }
+
+    private bool IsDiscoveredSourceSelected(string fullPath) =>
+        _sources.Any(s => s.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
+
+    private void ToggleDiscoveredSource(string name, string fullPath, bool selected)
+    {
+        if (selected && !IsDiscoveredSourceSelected(fullPath))
+            _sources.Add(new SourceConfig { Name = name, Path = fullPath });
+        else if (!selected)
+            _sources.RemoveAll(s => s.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
     }
 
     private void AddSource()
@@ -236,7 +304,8 @@
         Destination = new DestinationConfig { Path = _destPath },
         Retention = new RetentionConfig { KeepLast = _keepLast, MaxAgeDays = _maxAgeDays },
         Compression = _compression,
-        Schedule = string.IsNullOrWhiteSpace(_cron) ? null : new ScheduleConfig { Cron = _cron }
+        Schedule = string.IsNullOrWhiteSpace(_cron) ? null : new ScheduleConfig { Cron = _cron },
+        BrowseRoot = string.IsNullOrWhiteSpace(_browseRoot) ? null : _browseRoot
     };
 
     private void ShowDiff()

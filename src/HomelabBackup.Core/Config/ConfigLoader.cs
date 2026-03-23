@@ -48,8 +48,6 @@ public static class ConfigLoader
         if (string.IsNullOrWhiteSpace(config.Ssh.KeyPath))
             throw new ConfigurationException("SSH key path is required.");
 
-        if (config.Sources.Count == 0)
-            throw new ConfigurationException("At least one backup source must be configured.");
 
         foreach (var source in config.Sources)
         {

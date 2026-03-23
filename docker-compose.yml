@@ -8,6 +8,7 @@ services:
       - ./keys:/keys:ro
       - /host/data:/data:ro
       - ./logs:/logs
+      # - /opt/docker:/mnt/docker-volumes:ro   # set browse_root: /mnt/docker-volumes in backup.yml to enable source discovery
     environment:
       - CONFIG_PATH=/config/backup.yml
       - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
@@ -24,6 +25,7 @@ services:
       - ./keys:/keys:ro
       - /host/data:/data:ro
       - ./logs:/logs
+      # - /opt/docker:/mnt/docker-volumes:ro   # set browse_root: /mnt/docker-volumes in backup.yml to enable source discovery
     environment:
       - CONFIG_PATH=/config/backup.yml
       - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}

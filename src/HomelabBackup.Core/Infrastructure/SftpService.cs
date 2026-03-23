@@ -1,6 +1,7 @@
 using HomelabBackup.Core.Config;
 using Microsoft.Extensions.Logging;
 using Renci.SshNet;
+using Renci.SshNet.Common;
 
 namespace HomelabBackup.Core.Infrastructure;
 
@@ -130,6 +131,29 @@ public sealed class SftpService : ISftpService
             }
 
             return result;
+        }, ct);
+    }
+
+    public Task<IReadOnlyList<string>> ListSubdirectoriesAsync(string remotePath, CancellationToken ct = default)
+    {
+        return Task.Run<IReadOnlyList<string>>(() =>
+        {
+            ct.ThrowIfCancellationRequested();
+            EnsureConnected();
+
+            try
+            {
+                var entries = _client!.ListDirectory(remotePath);
+                return entries
+                    .Where(e => e.IsDirectory && e.Name is not ("." or ".."))
+                    .Select(e => e.Name)
+                    .OrderBy(n => n)
+                    .ToList<string>();
+            }
+            catch (SftpPathNotFoundException)
+            {
+                return [];
+            }
         }, ct);
     }
 

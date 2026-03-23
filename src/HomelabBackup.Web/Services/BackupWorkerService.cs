@@ -77,7 +77,8 @@ public sealed class BackupWorkerService : BackgroundService
         if (job.SourceName is not null)
             sources = sources.Where(s => s.Name.Equals(job.SourceName, StringComparison.OrdinalIgnoreCase));
 
-        foreach (var source in sources.ToList())
+        var sourceList = sources.ToList();
+        foreach (var source in sourceList)
         {
             _logger.LogInformation("Starting backup for {SourceName} (JobId: {JobId})", source.Name, job.JobId);
             var progress = _state.CreateProgress(source.Name);
@@ -93,6 +94,15 @@ public sealed class BackupWorkerService : BackgroundService
             else
                 _logger.LogError("Backup failed for {SourceName}: {Error}", source.Name, result.ErrorMessage);
         }
+
+        if (!job.DryRun)
+        {
+            var policy = scope.ServiceProvider.GetRequiredService<IRetentionPolicy>();
+            var sourceNames = sourceList.Select(s => s.Name).ToList();
+            var retentionResult = await policy.ApplyAsync(config.Destination, config.Retention, sourceNames, dryRun: false, ct);
+            _logger.LogInformation("Retention applied: {Deleted} deleted, {Retained} retained",
+                retentionResult.DeletedArchives.Count, retentionResult.RetainedArchives.Count);
+        }
     }
 
     private async Task HandleRestoreAsync(BackupJob job, CancellationToken ct)
@@ -104,7 +114,7 @@ public sealed class BackupWorkerService : BackgroundService
         _logger.LogInformation("Starting restore of {ArchiveFileName} (JobId: {JobId})", job.ArchiveFileName, job.JobId);
 
         var result = await engine.RestoreFileAsync(
-            job.ArchiveFileName!, config.Destination, job.DestinationPath!, ct);
+            job.ArchiveFileName!, config.Destination, job.DestinationPath!, ct: ct);
 
         _state.ReportCompletion(result);
 
