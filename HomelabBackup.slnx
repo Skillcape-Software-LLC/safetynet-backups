@@ -1,0 +1,7 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/HomelabBackup.Cli/HomelabBackup.Cli.csproj" />
+    <Project Path="src/HomelabBackup.Core/HomelabBackup.Core.csproj" />
+    <Project Path="src/HomelabBackup.Web/HomelabBackup.Web.csproj" />
+  </Folder>
+</Solution>

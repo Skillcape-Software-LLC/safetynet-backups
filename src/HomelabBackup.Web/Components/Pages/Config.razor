@@ -1,0 +1,307 @@
+@page "/config"
+@rendermode InteractiveServer
+@inject BackupConfig CurrentConfig
+@using HomelabBackup.Core.Config
+
+<PageTitle>Config - HomelabBackup</PageTitle>
+
+<div class="page-header">
+    <h2>Configuration</h2>
+</div>
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-2"></i>Configuration saved. Restart the application for changes to take effect.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle me-2"></i>@_error
+        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+    </div>
+}
+
+<div class="row g-4">
+    <!-- SSH Section -->
+    <div class="col-md-6">
+        <div class="content-card">
+            <div class="card-header"><i class="bi bi-key me-2"></i>SSH Connection</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Host</label>
+                    <input type="text" class="form-control" @bind="_ssh.Host" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Port</label>
+                    <input type="number" class="form-control" @bind="_ssh.Port" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">User</label>
+                    <input type="text" class="form-control" @bind="_ssh.User" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Key Path</label>
+                    <input type="text" class="form-control" @bind="_ssh.KeyPath" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Destination & Retention -->
+    <div class="col-md-6">
+        <div class="content-card mb-3">
+            <div class="card-header"><i class="bi bi-hdd me-2"></i>Destination</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Remote Path</label>
+                    <input type="text" class="form-control" @bind="_destPath" />
+                </div>
+            </div>
+        </div>
+
+        <div class="content-card mb-3">
+            <div class="card-header"><i class="bi bi-clock-history me-2"></i>Retention</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <label class="form-label">Keep Last</label>
+                        <input type="number" class="form-control" @bind="_keepLast" min="1" />
+                    </div>
+                    <div class="col-6 mb-3">
+                        <label class="form-label">Max Age (days)</label>
+                        <input type="number" class="form-control" @bind="_maxAgeDays" min="1" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content-card">
+            <div class="card-header"><i class="bi bi-gear me-2"></i>Options</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Compression</label>
+                    <select class="form-select" @bind="_compression">
+                        <option value="optimal">Optimal</option>
+                        <option value="fastest">Fastest</option>
+                        <option value="no_compression">No Compression</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Schedule (cron)</label>
+                    <input type="text" class="form-control" @bind="_cron" placeholder='e.g. "0 2 * * *" or leave empty' />
+                    <div class="form-text">Leave empty for one-shot mode</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sources -->
+    <div class="col-12">
+        <div class="content-card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-folder-plus me-2"></i>Sources</span>
+                <button class="btn btn-sm btn-accent" @onclick="AddSource">
+                    <i class="bi bi-plus-lg me-1"></i>Add Source
+                </button>
+            </div>
+            <div class="card-body">
+                @for (int i = 0; i < _sources.Count; i++)
+                {
+                    var idx = i;
+                    <div class="row align-items-end mb-3 pb-3 @(idx < _sources.Count - 1 ? "border-bottom" : "")">
+                        <div class="col-md-3">
+                            <label class="form-label">Name</label>
+                            <input type="text" class="form-control" @bind="_sources[idx].Name" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Path</label>
+                            <input type="text" class="form-control" @bind="_sources[idx].Path" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Exclude (comma-separated)</label>
+                            <input type="text" class="form-control"
+                                   value="@string.Join(", ", _sources[idx].Exclude)"
+                                   @onchange="e => UpdateExclude(idx, e.Value?.ToString())" />
+                        </div>
+                        <div class="col-md-1 text-end">
+                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveSource(idx)">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Action Buttons -->
+<div class="mt-4 d-flex gap-2">
+    <button class="btn btn-outline-secondary" @onclick="ValidateConfig">
+        <i class="bi bi-check2 me-1"></i>Validate
+    </button>
+    <button class="btn btn-outline-info" @onclick="ShowDiff">
+        <i class="bi bi-file-diff me-1"></i>Show Diff
+    </button>
+    <button class="btn btn-accent" @onclick="SaveConfig">
+        <i class="bi bi-save me-1"></i>Save
+    </button>
+</div>
+
+@if (_showDiff)
+{
+    <div class="content-card mt-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-file-diff me-2"></i>Configuration Diff</span>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _showDiff = false">Close</button>
+        </div>
+        <div class="card-body p-0">
+            <div class="row g-0">
+                <div class="col-6 border-end">
+                    <div class="p-2 bg-light border-bottom"><small class="fw-bold text-secondary">Current (on disk)</small></div>
+                    <pre class="p-3 mb-0" style="font-size: 0.8rem; max-height: 400px; overflow: auto;">@_currentYaml</pre>
+                </div>
+                <div class="col-6">
+                    <div class="p-2 bg-light border-bottom"><small class="fw-bold text-secondary">Form (pending changes)</small></div>
+                    <pre class="p-3 mb-0" style="font-size: 0.8rem; max-height: 400px; overflow: auto;">@_pendingYaml</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private SshConfig _ssh = new();
+    private string _destPath = "";
+    private int _keepLast;
+    private int _maxAgeDays;
+    private string _compression = "optimal";
+    private string _cron = "";
+    private List<SourceConfig> _sources = [];
+    private bool _saved;
+    private string? _error;
+    private bool _showDiff;
+    private string _currentYaml = "";
+    private string _pendingYaml = "";
+
+    protected override void OnInitialized()
+    {
+        // Copy current config to form
+        _ssh = new SshConfig
+        {
+            Host = CurrentConfig.Ssh.Host,
+            Port = CurrentConfig.Ssh.Port,
+            User = CurrentConfig.Ssh.User,
+            KeyPath = CurrentConfig.Ssh.KeyPath
+        };
+        _destPath = CurrentConfig.Destination.Path;
+        _keepLast = CurrentConfig.Retention.KeepLast;
+        _maxAgeDays = CurrentConfig.Retention.MaxAgeDays;
+        _compression = CurrentConfig.Compression;
+        _cron = CurrentConfig.Schedule?.Cron ?? "";
+        _sources = CurrentConfig.Sources.Select(s => new SourceConfig
+        {
+            Name = s.Name,
+            Path = s.Path,
+            Exclude = new List<string>(s.Exclude)
+        }).ToList();
+    }
+
+    private void AddSource()
+    {
+        _sources.Add(new SourceConfig());
+    }
+
+    private void RemoveSource(int idx)
+    {
+        if (idx >= 0 && idx < _sources.Count)
+            _sources.RemoveAt(idx);
+    }
+
+    private void UpdateExclude(int idx, string? value)
+    {
+        _sources[idx].Exclude = (value ?? "")
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .ToList();
+    }
+
+    private BackupConfig BuildConfig() => new()
+    {
+        Ssh = _ssh,
+        Sources = _sources,
+        Destination = new DestinationConfig { Path = _destPath },
+        Retention = new RetentionConfig { KeepLast = _keepLast, MaxAgeDays = _maxAgeDays },
+        Compression = _compression,
+        Schedule = string.IsNullOrWhiteSpace(_cron) ? null : new ScheduleConfig { Cron = _cron }
+    };
+
+    private void ShowDiff()
+    {
+        try
+        {
+            _currentYaml = ConfigLoader.Serialize(CurrentConfig);
+            _pendingYaml = ConfigLoader.Serialize(BuildConfig());
+            _showDiff = true;
+        }
+        catch (Exception ex)
+        {
+            _error = $"Could not generate diff: {ex.Message}";
+        }
+    }
+
+    private void ValidateConfig()
+    {
+        _error = null;
+        _saved = false;
+        try
+        {
+            ConfigLoader.Validate(BuildConfig());
+            _error = null;
+            _saved = false;
+            // Show a quick success indicator
+            StateHasChanged();
+        }
+        catch (ConfigurationException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void SaveConfig()
+    {
+        _error = null;
+        _saved = false;
+
+        try
+        {
+            var newConfig = BuildConfig();
+            ConfigLoader.Validate(newConfig);
+
+            var yaml = ConfigLoader.Serialize(newConfig);
+            var configPath = Environment.GetEnvironmentVariable("CONFIG_PATH") ?? "config/backup.yml";
+            File.WriteAllText(configPath, yaml);
+
+            _saved = true;
+        }
+        catch (ConfigurationException ex)
+        {
+            _error = $"Validation error: {ex.Message}";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            _error = "Save error: Permission denied writing configuration file.";
+        }
+        catch (IOException)
+        {
+            _error = "Save error: Could not write configuration file. Check path and permissions.";
+        }
+        catch
+        {
+            _error = "An unexpected error occurred while saving configuration.";
+        }
+    }
+}

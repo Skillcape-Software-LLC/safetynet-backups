@@ -1,0 +1,273 @@
+@page "/sources"
+@rendermode InteractiveServer
+@inject BackupConfig Config
+@inject BackupStateService State
+@inject BackupJobQueue JobQueue
+@implements IDisposable
+
+<PageTitle>Sources - HomelabBackup</PageTitle>
+
+<div class="page-header">
+    <h2>Backup Sources</h2>
+    <div>
+        @if (_isRunning)
+        {
+            <button class="btn btn-outline-danger me-2" @onclick="CancelAll">
+                <i class="bi bi-stop-fill me-1"></i>Cancel All
+            </button>
+        }
+        else
+        {
+            <button class="btn btn-outline-secondary me-2" @onclick="() => BackupAll(true)">
+                <i class="bi bi-eye me-1"></i>Dry Run All
+            </button>
+            <button class="btn btn-accent" @onclick="() => ConfirmBackupAll()">
+                <i class="bi bi-play-fill me-1"></i>Backup All
+            </button>
+        }
+    </div>
+</div>
+
+@if (Config.Sources.Count == 0)
+{
+    <div class="content-card">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-folder-x" style="font-size: 3rem; color: var(--text-secondary);"></i>
+            <p class="mt-3 text-secondary">No backup sources configured.</p>
+            <a href="config" class="btn btn-accent">
+                <i class="bi bi-gear me-1"></i>Go to Config
+            </a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var source in Config.Sources)
+        {
+            var progress = _progress.GetValueOrDefault(source.Name);
+            var lastResult = State.LastResults.GetValueOrDefault(source.Name);
+            var isActive = _activeBackups.Contains(source.Name);
+
+            <div class="col-sm-6 col-lg-4">
+                <div class="content-card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>
+                            <i class="bi bi-folder2 me-2"></i>@source.Name
+                        </span>
+                        @if (lastResult is not null)
+                        {
+                            <span class="badge @(lastResult.Success ? "badge-success" : "badge-danger")">
+                                @(lastResult.Success ? "OK" : "Failed")
+                            </span>
+                        }
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-1"><code>@source.Path</code></p>
+                        @if (source.Exclude.Count > 0)
+                        {
+                            <p class="text-secondary small mb-2">
+                                Excludes: @string.Join(", ", source.Exclude)
+                            </p>
+                        }
+
+                        @if (progress is not null && isActive)
+                        {
+                            <div class="mt-3">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <small class="@GetPhaseClass(progress.Phase)">
+                                        <strong>@progress.Phase</strong>
+                                    </small>
+                                    <small>@progress.FilesProcessed / @progress.FilesTotal (@GetProgressPercent(progress)%)</small>
+                                </div>
+                                <div class="progress progress-thin" role="progressbar"
+                                     aria-valuenow="@GetProgressPercent(progress)" aria-valuemin="0" aria-valuemax="100">
+                                    <div class="progress-bar bg-primary"
+                                         style="width: @GetProgressPercent(progress)%">
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrEmpty(progress.CurrentFile))
+                                {
+                                    <small class="text-secondary text-truncate d-block mt-1">@progress.CurrentFile</small>
+                                }
+                            </div>
+                        }
+
+                        <div class="mt-3 d-flex gap-2">
+                            @if (isActive)
+                            {
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => CancelSource(source.Name)">
+                                    <i class="bi bi-stop-fill me-1"></i>Cancel
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-accent"
+                                        @onclick="() => BackupSource(source.Name, false)">
+                                    <i class="bi bi-play-fill me-1"></i>Backup
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        @onclick="() => BackupSource(source.Name, true)">
+                                    <i class="bi bi-eye me-1"></i>Dry Run
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<!-- Confirm Backup All modal -->
+@if (_showConfirmAll)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Confirm Backup All</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showConfirmAll = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p>This will back up all <strong>@Config.Sources.Count</strong> configured source(s). Continue?</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _showConfirmAll = false">Cancel</button>
+                    <button class="btn btn-accent" @onclick="() => { _showConfirmAll = false; BackupAll(false); }">
+                        <i class="bi bi-play-fill me-1"></i>Backup All
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private Dictionary<string, BackupProgressEvent> _progress = new();
+    private HashSet<string> _activeBackups = new();
+    private Dictionary<string, Guid> _activeJobIds = new();
+    private bool _isRunning => _activeBackups.Count > 0;
+    private bool _showConfirmAll;
+
+    protected override void OnInitialized()
+    {
+        State.OnProgressChanged += OnProgress;
+        State.OnBackupCompleted += OnCompleted;
+    }
+
+    private void BackupSource(string sourceName, bool dryRun)
+    {
+        var (jobId, queued) = JobQueue.EnqueueBackup(sourceName, dryRun);
+        if (queued)
+        {
+            _activeBackups.Add(sourceName);
+            _activeJobIds[sourceName] = jobId;
+            Toast.Show("Backup Queued", $"{(dryRun ? "Dry run" : "Backup")} started for {sourceName}", Toast.ToastType.Info);
+        }
+        else
+        {
+            Toast.Show("Queue Full", "Job queue is full. Please wait for current jobs to finish.", Toast.ToastType.Warning);
+        }
+        StateHasChanged();
+    }
+
+    private void BackupAll(bool dryRun)
+    {
+        var (jobId, queued) = JobQueue.EnqueueBackup(null, dryRun);
+        if (queued)
+        {
+            foreach (var source in Config.Sources)
+            {
+                _activeBackups.Add(source.Name);
+                _activeJobIds[source.Name] = jobId;
+            }
+            Toast.Show("Backup Queued", $"{(dryRun ? "Dry run" : "Backup")} started for all sources", Toast.ToastType.Info);
+        }
+        else
+        {
+            Toast.Show("Queue Full", "Job queue is full. Please wait for current jobs to finish.", Toast.ToastType.Warning);
+        }
+        StateHasChanged();
+    }
+
+    private void ConfirmBackupAll() => _showConfirmAll = true;
+
+    private void CancelSource(string sourceName)
+    {
+        if (_activeJobIds.TryGetValue(sourceName, out var jobId))
+        {
+            JobQueue.TryCancelJob(jobId, State);
+            _activeBackups.Remove(sourceName);
+            _activeJobIds.Remove(sourceName);
+            Toast.Show("Cancelled", $"Backup cancelled for {sourceName}", Toast.ToastType.Warning);
+            StateHasChanged();
+        }
+    }
+
+    private void CancelAll()
+    {
+        foreach (var (source, jobId) in _activeJobIds)
+            JobQueue.TryCancelJob(jobId, State);
+
+        _activeBackups.Clear();
+        _activeJobIds.Clear();
+        Toast.Show("Cancelled", "All active backups cancelled", Toast.ToastType.Warning);
+        StateHasChanged();
+    }
+
+    private void OnProgress(BackupProgressEvent evt)
+    {
+        InvokeAsync(() =>
+        {
+            _progress[evt.Source] = evt;
+            if (evt.Phase is BackupPhase.Complete or BackupPhase.Failed)
+                _activeBackups.Remove(evt.Source);
+            StateHasChanged();
+        });
+    }
+
+    private void OnCompleted(BackupResult result)
+    {
+        InvokeAsync(() =>
+        {
+            _activeBackups.Remove(result.SourceName);
+            _activeJobIds.Remove(result.SourceName);
+
+            if (result.Success)
+                Toast.Show("Backup Complete", $"{result.SourceName}: {result.FilesCount} files, {FormatBytes(result.CompressedBytes)}, verified: {result.VerificationPassed}", Toast.ToastType.Success);
+            else
+                Toast.Show("Backup Failed", $"{result.SourceName}: {result.ErrorMessage}", Toast.ToastType.Error);
+
+            StateHasChanged();
+        });
+    }
+
+    private static int GetProgressPercent(BackupProgressEvent evt) =>
+        evt.FilesTotal > 0 ? (int)(evt.FilesProcessed * 100.0 / evt.FilesTotal) : 0;
+
+    private static string GetPhaseClass(BackupPhase phase) => phase switch
+    {
+        BackupPhase.Scanning => "phase-scanning",
+        BackupPhase.Compressing => "phase-compressing",
+        BackupPhase.Transferring => "phase-transferring",
+        BackupPhase.Verifying => "phase-verifying",
+        BackupPhase.Complete => "phase-complete",
+        BackupPhase.Failed => "phase-failed",
+        _ => ""
+    };
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
+    };
+
+    public void Dispose()
+    {
+        State.OnProgressChanged -= OnProgress;
+        State.OnBackupCompleted -= OnCompleted;
+    }
+}

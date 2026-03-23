@@ -1,0 +1,247 @@
+@page "/archives"
+@rendermode InteractiveServer
+@inject BackupConfig Config
+@inject BackupJobQueue JobQueue
+@using HomelabBackup.Core.Infrastructure
+@using HomelabBackup.Core.Services
+@inject ISftpService Sftp
+@inject IManifestService ManifestService
+
+<PageTitle>Archives - HomelabBackup</PageTitle>
+
+<div class="page-header">
+    <h2>Remote Archives</h2>
+    <button class="btn btn-accent" @onclick="LoadArchives" disabled="@_loading">
+        <i class="bi bi-arrow-clockwise me-1"></i>@(_loading ? "Loading..." : "Refresh")
+    </button>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+
+@if (_loading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-2 text-secondary">Connecting to remote host...</p>
+    </div>
+}
+else if (_archives.Count == 0 && _error is null)
+{
+    <div class="text-center py-5 text-secondary">
+        <i class="bi bi-archive" style="font-size: 3rem;"></i>
+        <p class="mt-2">No archives found. Run a backup first.</p>
+    </div>
+}
+else
+{
+    @foreach (var group in _archives.GroupBy(a => a.SourceName).OrderBy(g => g.Key))
+    {
+        <div class="content-card mb-3">
+            <div class="card-header d-flex justify-content-between">
+                <span><i class="bi bi-folder2 me-2"></i>@group.Key</span>
+                <span class="badge bg-secondary">@group.Count() archive(s)</span>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-modern mb-0">
+                    <thead>
+                        <tr>
+                            <th>Archive</th>
+                            <th>Date</th>
+                            <th>Size</th>
+                            <th>Files</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var archive in group.OrderByDescending(a => a.CreatedUtc))
+                        {
+                            <tr>
+                                <td><code>@archive.ArchiveFileName</code></td>
+                                <td>@archive.CreatedUtc.ToString("yyyy-MM-dd HH:mm")</td>
+                                <td>@FormatBytes(archive.CompressedBytes)</td>
+                                <td>@archive.FileCount</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary me-1"
+                                            @onclick="() => ShowRestoreDialog(archive)">
+                                        <i class="bi bi-download me-1"></i>Restore
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger"
+                                            @onclick="() => ConfirmDelete(archive)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+}
+
+<!-- Restore Modal -->
+@if (_restoreTarget is not null)
+{
+    <div class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Restore Archive</h5>
+                    <button type="button" class="btn-close" @onclick="() => _restoreTarget = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Restoring: <code>@_restoreTarget.ArchiveFileName</code></p>
+                    <div class="mb-3">
+                        <label class="form-label">Destination Path</label>
+                        <input type="text" class="form-control" @bind="_restoreDest" placeholder="/restore/path" />
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _restoreTarget = null">Cancel</button>
+                    <button class="btn btn-accent" @onclick="ExecuteRestore" disabled="@string.IsNullOrWhiteSpace(_restoreDest)">
+                        <i class="bi bi-download me-1"></i>Restore
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Delete Confirmation Modal -->
+@if (_deleteTarget is not null)
+{
+    <div class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Archive</h5>
+                    <button type="button" class="btn-close" @onclick="() => _deleteTarget = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>@_deleteTarget.ArchiveFileName</strong>?</p>
+                    <p class="text-danger">This action cannot be undone.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _deleteTarget = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ExecuteDelete">
+                        <i class="bi bi-trash me-1"></i>Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<BackupEntry> _archives = [];
+    private bool _loading;
+    private string? _error;
+    private BackupEntry? _restoreTarget;
+    private BackupEntry? _deleteTarget;
+    private string _restoreDest = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadArchives();
+    }
+
+    private async Task LoadArchives()
+    {
+        _loading = true;
+        _error = null;
+        _archives = [];
+        StateHasChanged();
+
+        try
+        {
+            await Sftp.ConnectAsync();
+
+            foreach (var source in Config.Sources)
+            {
+                var remoteDir = $"{Config.Destination.Path}/{source.Name}";
+                try
+                {
+                    var files = await Sftp.ListDirectoryAsync(remoteDir);
+                    foreach (var mf in files.Where(f => f.Name.EndsWith(".manifest.json")))
+                    {
+                        using var stream = new MemoryStream();
+                        await Sftp.DownloadToStreamAsync(mf.FullPath, stream);
+                        stream.Position = 0;
+                        var manifest = await ManifestService.ReadFromStreamAsync(stream);
+
+                        _archives.Add(new BackupEntry(
+                            source.Name, manifest.ArchiveFileName,
+                            manifest.CreatedUtc, manifest.CompressedBytes,
+                            manifest.Files.Count));
+                    }
+                }
+                catch { /* source dir may not exist yet */ }
+            }
+
+            await Sftp.DisconnectAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = $"Failed to connect: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void ShowRestoreDialog(BackupEntry archive)
+    {
+        _restoreTarget = archive;
+        _restoreDest = "";
+    }
+
+    private void ConfirmDelete(BackupEntry archive) => _deleteTarget = archive;
+
+    private void ExecuteRestore()
+    {
+        if (_restoreTarget is null || string.IsNullOrWhiteSpace(_restoreDest)) return;
+        var (_, queued) = JobQueue.EnqueueRestore(_restoreTarget.ArchiveFileName, _restoreDest);
+        if (queued)
+            Toast.Show("Restore Queued", $"Restoring {_restoreTarget.ArchiveFileName} to {_restoreDest}", Toast.ToastType.Info);
+        else
+            Toast.Show("Queue Full", "Job queue is full. Please wait for current jobs to finish.", Toast.ToastType.Warning);
+        _restoreTarget = null;
+    }
+
+    private async Task ExecuteDelete()
+    {
+        if (_deleteTarget is null) return;
+        var name = _deleteTarget.ArchiveFileName;
+
+        try
+        {
+            await Sftp.ConnectAsync();
+            var remoteDir = $"{Config.Destination.Path}/{_deleteTarget.SourceName}";
+            await Sftp.DeleteAsync($"{remoteDir}/{_deleteTarget.ArchiveFileName}");
+            await Sftp.DeleteAsync($"{remoteDir}/{ManifestService.GetManifestFileName(_deleteTarget.ArchiveFileName)}");
+            await Sftp.DisconnectAsync();
+
+            _archives.Remove(_deleteTarget);
+            Toast.Show("Deleted", $"Archive {name} deleted successfully", Toast.ToastType.Success);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete failed: {ex.Message}";
+            Toast.Show("Delete Failed", $"Could not delete {name}", Toast.ToastType.Error);
+        }
+
+        _deleteTarget = null;
+    }
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
+    };
+}

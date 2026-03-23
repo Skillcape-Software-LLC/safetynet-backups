@@ -1,0 +1,59 @@
+@inherits LayoutComponentBase
+
+<div class="app-layout">
+    <nav class="sidebar">
+        <div class="sidebar-header">
+            <i class="bi bi-shield-check"></i>
+            <span>HomelabBackup</span>
+        </div>
+        <ul class="sidebar-nav">
+            <li>
+                <NavLink href="" Match="NavLinkMatch.All">
+                    <i class="bi bi-speedometer2"></i>
+                    <span>Dashboard</span>
+                </NavLink>
+            </li>
+            <li>
+                <NavLink href="sources">
+                    <i class="bi bi-folder2-open"></i>
+                    <span>Sources</span>
+                </NavLink>
+            </li>
+            <li>
+                <NavLink href="archives">
+                    <i class="bi bi-archive"></i>
+                    <span>Archives</span>
+                </NavLink>
+            </li>
+            <li>
+                <NavLink href="config">
+                    <i class="bi bi-gear"></i>
+                    <span>Config</span>
+                </NavLink>
+            </li>
+            <li>
+                <NavLink href="logs">
+                    <i class="bi bi-terminal"></i>
+                    <span>Logs</span>
+                </NavLink>
+            </li>
+        </ul>
+        <div class="sidebar-footer">
+            <small>v1.0.0</small>
+        </div>
+    </nav>
+
+    <main class="main-content">
+        <div class="content-area">
+            @Body
+        </div>
+    </main>
+</div>
+
+<Toast />
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">&#x1f5d9;</span>
+</div>

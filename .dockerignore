@@ -1,0 +1,9 @@
+**/bin/
+**/obj/
+keys/
+.env
+logs/
+.git/
+.vs/
+.idea/
+references/

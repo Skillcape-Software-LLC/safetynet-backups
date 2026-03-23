@@ -1,0 +1,232 @@
+@page "/"
+@rendermode InteractiveServer
+@inject BackupConfig Config
+@inject BackupStateService State
+@implements IDisposable
+
+<PageTitle>Dashboard - HomelabBackup</PageTitle>
+
+<div class="page-header">
+    <h2>Dashboard</h2>
+</div>
+
+<!-- Summary Cards -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-label">Sources</div>
+                    <div class="stat-value">@Config.Sources.Count</div>
+                </div>
+                <div class="stat-icon bg-primary bg-opacity-10 text-primary">
+                    <i class="bi bi-folder2-open"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-label">Last Status</div>
+                    <div class="stat-value">
+                        @if (_lastResults.Count == 0)
+                        {
+                            <span class="text-secondary">--</span>
+                        }
+                        else if (_lastResults.Values.All(r => r.Success))
+                        {
+                            <span class="text-success">OK</span>
+                        }
+                        else
+                        {
+                            <span class="text-danger">Failed</span>
+                        }
+                    </div>
+                </div>
+                <div class="stat-icon bg-success bg-opacity-10 text-success">
+                    <i class="bi bi-check-circle"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-label">Next Run</div>
+                    <div class="stat-value" style="font-size: 1.1rem;">@GetNextRun()</div>
+                </div>
+                <div class="stat-icon bg-warning bg-opacity-10 text-warning">
+                    <i class="bi bi-clock"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="stat-card">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-label">Schedule</div>
+                    <div class="stat-value" style="font-size: 1rem;">@(Config.Schedule?.Cron ?? "One-shot")</div>
+                </div>
+                <div class="stat-icon bg-info bg-opacity-10 text-info">
+                    <i class="bi bi-calendar-event"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Source Status Table -->
+<div class="content-card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Source Status</span>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-modern mb-0">
+            <thead>
+                <tr>
+                    <th>Source</th>
+                    <th>Path</th>
+                    <th>Last Backup</th>
+                    <th>Status</th>
+                    <th>Size</th>
+                    <th>Duration</th>
+                    <th>Verified</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var source in Config.Sources)
+                {
+                    var result = _lastResults.GetValueOrDefault(source.Name);
+                    <tr>
+                        <td><strong>@source.Name</strong></td>
+                        <td class="text-secondary"><code>@source.Path</code></td>
+                        <td>
+                            @if (result is not null)
+                            {
+                                <span title="@result.Duration">@FormatRelativeTime(result.Duration)</span>
+                            }
+                            else
+                            {
+                                <span class="text-secondary">Never</span>
+                            }
+                        </td>
+                        <td>
+                            @if (result is null)
+                            {
+                                <span class="badge badge-secondary">Never</span>
+                            }
+                            else if (result.Success)
+                            {
+                                <span class="badge badge-success">Success</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-danger">Failed</span>
+                            }
+                        </td>
+                        <td>@(result is not null ? FormatBytes(result.CompressedBytes) : "--")</td>
+                        <td>@(result is not null ? result.Duration.ToString(@"mm\:ss") : "--")</td>
+                        <td>
+                            @if (result is not null)
+                            {
+                                @if (result.VerificationPassed)
+                                {
+                                    <i class="bi bi-patch-check-fill text-success"></i>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-x-circle-fill text-danger"></i>
+                                }
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Errors Panel -->
+@if (_errors.Count > 0)
+{
+    <div class="content-card mt-4">
+        <div class="card-header text-danger">
+            <i class="bi bi-exclamation-triangle me-2"></i>Recent Errors
+        </div>
+        <div class="card-body">
+            @foreach (var err in _errors)
+            {
+                <div class="alert alert-danger py-2 mb-2">
+                    <strong>@err.SourceName</strong>: @err.ErrorMessage
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private Dictionary<string, BackupResult> _lastResults = new();
+    private List<BackupResult> _errors = [];
+
+    protected override void OnInitialized()
+    {
+        RefreshData();
+        State.OnBackupCompleted += OnBackupCompleted;
+    }
+
+    private void OnBackupCompleted(BackupResult result)
+    {
+        InvokeAsync(() =>
+        {
+            RefreshData();
+            StateHasChanged();
+        });
+    }
+
+    private void RefreshData()
+    {
+        _lastResults = new Dictionary<string, BackupResult>(State.LastResults);
+        _errors = _lastResults.Values.Where(r => !r.Success).ToList();
+    }
+
+    private string GetNextRun()
+    {
+        if (Config.Schedule?.Cron is null)
+            return "Not scheduled";
+
+        try
+        {
+            var cron = Cronos.CronExpression.Parse(Config.Schedule.Cron);
+            var next = cron.GetNextOccurrence(DateTime.UtcNow);
+            if (next is null) return "N/A";
+
+            var diff = next.Value - DateTime.UtcNow;
+            if (diff.TotalMinutes < 60) return $"In {diff.Minutes}m";
+            if (diff.TotalHours < 24) return $"In {diff.Hours}h {diff.Minutes}m";
+            return $"In {diff.Days}d {diff.Hours}h";
+        }
+        catch { return "Invalid cron"; }
+    }
+
+    private static string FormatRelativeTime(TimeSpan duration) =>
+        duration.TotalSeconds < 60 ? $"{duration.Seconds}s" :
+        duration.TotalMinutes < 60 ? $"{duration.Minutes}m {duration.Seconds}s" :
+        $"{(int)duration.TotalHours}h {duration.Minutes}m";
+
+    private static string FormatBytes(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        < 1024 * 1024 * 1024 => $"{bytes / (1024.0 * 1024):F1} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):F1} GB"
+    };
+
+    public void Dispose()
+    {
+        State.OnBackupCompleted -= OnBackupCompleted;
+    }
+}

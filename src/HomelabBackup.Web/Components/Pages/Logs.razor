@@ -1,0 +1,127 @@
+@page "/logs"
+@rendermode InteractiveServer
+@inject BackupStateService State
+@inject InMemoryLoggerProvider LogProvider
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Logs - HomelabBackup</PageTitle>
+
+<div class="page-header">
+    <h2>Logs</h2>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        <select class="form-select form-select-sm" style="width: auto;" @bind="_levelFilter" aria-label="Filter by level">
+            <option value="">All Levels</option>
+            <option value="Information">Info</option>
+            <option value="Warning">Warning</option>
+            <option value="Error">Error</option>
+        </select>
+        <select class="form-select form-select-sm" style="width: auto;" @bind="_sourceFilter" aria-label="Filter by source">
+            <option value="">All Sources</option>
+            @foreach (var src in GetAvailableSources())
+            {
+                <option value="@src">@src</option>
+            }
+        </select>
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" @bind="_autoScroll" id="autoScrollToggle" />
+            <label class="form-check-label" for="autoScrollToggle">Auto-scroll</label>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh" aria-label="Refresh logs">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+</div>
+
+<div class="log-viewer" id="logContainer" @ref="_logContainer">
+    @foreach (var entry in GetFilteredEntries())
+    {
+        <div class="log-entry">
+            <span class="log-timestamp">@entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss.fff")</span>
+            <span class="log-level-@entry.Level"> @PadLevel(entry.Level)</span>
+            <span class="log-source">[@entry.Source]</span>
+            @entry.Message
+        </div>
+    }
+    @if (GetFilteredEntries().Count == 0)
+    {
+        <div class="text-secondary text-center py-3">No log entries match the current filters.</div>
+    }
+</div>
+
+<div class="mt-2 d-flex justify-content-between align-items-center">
+    <small class="text-secondary">@GetFilteredEntries().Count entries shown (of @_entries.Count total)</small>
+</div>
+
+@code {
+    private string _levelFilter = "";
+    private string _sourceFilter = "";
+    private bool _autoScroll = true;
+    private ElementReference _logContainer;
+    private List<LogEntry> _entries = [];
+
+    protected override void OnInitialized()
+    {
+        _entries = LogProvider.Entries.ToList();
+        State.OnLogMessage += OnNewLog;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_autoScroll)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("eval",
+                    "document.getElementById('logContainer')?.scrollTo(0, document.getElementById('logContainer').scrollHeight)");
+            }
+            catch { /* JS interop may fail during disconnect */ }
+        }
+    }
+
+    private void OnNewLog(LogEntry entry)
+    {
+        InvokeAsync(() =>
+        {
+            _entries = LogProvider.Entries.ToList();
+            StateHasChanged();
+        });
+    }
+
+    private void Refresh()
+    {
+        _entries = LogProvider.Entries.ToList();
+    }
+
+    private List<LogEntry> GetFilteredEntries()
+    {
+        var filtered = _entries.AsEnumerable();
+
+        if (!string.IsNullOrEmpty(_levelFilter))
+            filtered = filtered.Where(e => e.Level == _levelFilter);
+
+        if (!string.IsNullOrEmpty(_sourceFilter))
+            filtered = filtered.Where(e => e.Source == _sourceFilter);
+
+        return filtered.ToList();
+    }
+
+    private List<string> GetAvailableSources()
+    {
+        return _entries.Select(e => e.Source).Distinct().OrderBy(s => s).ToList();
+    }
+
+    private static string PadLevel(string level) => level switch
+    {
+        "Information" => "INF",
+        "Warning" => "WRN",
+        "Error" => "ERR",
+        "Debug" => "DBG",
+        _ => level.Length >= 3 ? level[..3].ToUpper() : level.ToUpper()
+    };
+
+    public void Dispose()
+    {
+        State.OnLogMessage -= OnNewLog;
+    }
+}

@@ -1,0 +1,32 @@
+services:
+  backup-cli:
+    build:
+      context: .
+      dockerfile: src/HomelabBackup.Cli/Dockerfile
+    volumes:
+      - ./config:/config:ro
+      - ./keys:/keys:ro
+      - /host/data:/data:ro
+      - ./logs:/logs
+    environment:
+      - CONFIG_PATH=/config/backup.yml
+      - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
+    profiles: [cli]
+
+  backup-web:
+    build:
+      context: .
+      dockerfile: src/HomelabBackup.Web/Dockerfile
+    ports:
+      - "5200:8080"
+    volumes:
+      - ./config:/config      # rw — UI can edit config
+      - ./keys:/keys:ro
+      - /host/data:/data:ro
+      - ./logs:/logs
+    environment:
+      - CONFIG_PATH=/config/backup.yml
+      - BACKUP_KEY_PASSPHRASE=${BACKUP_KEY_PASSPHRASE:-}
+      - ASPNETCORE_ENVIRONMENT=Production
+    restart: unless-stopped
+    profiles: [web]

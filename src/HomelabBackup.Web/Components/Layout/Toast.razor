@@ -1,0 +1,72 @@
+@implements IDisposable
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1100;">
+    @foreach (var toast in _toasts)
+    {
+        <div class="toast show border-0 shadow-sm" role="alert">
+            <div class="toast-header @GetHeaderClass(toast.Type)">
+                <i class="bi @GetIcon(toast.Type) me-2"></i>
+                <strong class="me-auto">@toast.Title</strong>
+                <button type="button" class="btn-close btn-close-white" @onclick="() => Dismiss(toast)"></button>
+            </div>
+            <div class="toast-body">@toast.Message</div>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<ToastItem> _toasts = [];
+    private static event Action<ToastItem>? OnShow;
+
+    protected override void OnInitialized()
+    {
+        OnShow += ShowToast;
+    }
+
+    private void ShowToast(ToastItem item)
+    {
+        InvokeAsync(() =>
+        {
+            _toasts.Add(item);
+            StateHasChanged();
+            _ = AutoDismissAsync(item);
+        });
+    }
+
+    private async Task AutoDismissAsync(ToastItem item)
+    {
+        await Task.Delay(4000);
+        Dismiss(item);
+    }
+
+    private void Dismiss(ToastItem item)
+    {
+        _toasts.Remove(item);
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose() => OnShow -= ShowToast;
+
+    // Static helper for any component to show a toast
+    public static void Show(string title, string message, ToastType type = ToastType.Info)
+        => OnShow?.Invoke(new ToastItem(title, message, type));
+
+    private static string GetHeaderClass(ToastType type) => type switch
+    {
+        ToastType.Success => "bg-success text-white",
+        ToastType.Error => "bg-danger text-white",
+        ToastType.Warning => "bg-warning text-dark",
+        _ => "bg-primary text-white"
+    };
+
+    private static string GetIcon(ToastType type) => type switch
+    {
+        ToastType.Success => "bi-check-circle-fill",
+        ToastType.Error => "bi-exclamation-triangle-fill",
+        ToastType.Warning => "bi-exclamation-circle-fill",
+        _ => "bi-info-circle-fill"
+    };
+
+    public record ToastItem(string Title, string Message, ToastType Type);
+    public enum ToastType { Info, Success, Warning, Error }
+}
