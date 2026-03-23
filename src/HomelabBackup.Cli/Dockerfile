@@ -8,7 +8,7 @@ RUN dotnet publish src/HomelabBackup.Cli/HomelabBackup.Cli.csproj \
     -o /publish
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
-RUN groupadd -r backup && useradd -r -g backup -s /sbin/nologin backup
+RUN groupadd -r --force backup && id -u backup &>/dev/null || useradd -r -g backup -s /sbin/nologin backup
 WORKDIR /app
 COPY --from=build /publish .
 RUN mkdir -p /logs && chown -R backup:backup /app /logs
