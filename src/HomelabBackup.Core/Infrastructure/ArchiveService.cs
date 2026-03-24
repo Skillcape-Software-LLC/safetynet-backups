@@ -165,7 +165,7 @@ public sealed class ArchiveService : IArchiveService
         return files;
     }
 
-    private static Regex GlobToRegex(string glob)
+    internal static Regex GlobToRegex(string glob)
     {
         var pattern = "^" + Regex.Escape(glob)
             .Replace(@"\*", ".*")

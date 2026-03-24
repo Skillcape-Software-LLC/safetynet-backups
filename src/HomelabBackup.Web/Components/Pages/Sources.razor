@@ -3,6 +3,7 @@
 @inject BackupConfig Config
 @inject BackupStateService State
 @inject BackupJobQueue JobQueue
+@inject HomelabBackup.Web.Services.ConfigService ConfigService
 @implements IDisposable
 
 <PageTitle>Sources - HomelabBackup</PageTitle>
@@ -110,6 +111,10 @@ else
                                         @onclick="() => BackupSource(source.Name, true)">
                                     <i class="bi bi-eye me-1"></i>Dry Run
                                 </button>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        @onclick="() => _ignoresPanel.Open(source)">
+                                    <i class="bi bi-shield-check me-1"></i>Ignores
+                                </button>
                             }
                         </div>
                     </div>
@@ -118,6 +123,8 @@ else
         }
     </div>
 }
+
+<SourceIgnoresOffcanvas @ref="_ignoresPanel" OnSaved="StateHasChanged" />
 
 <!-- Confirm Backup All modal -->
 @if (_showConfirmAll)
@@ -149,6 +156,7 @@ else
     private Dictionary<string, Guid> _activeJobIds = new();
     private bool _isRunning => _activeBackups.Count > 0;
     private bool _showConfirmAll;
+    private SourceIgnoresOffcanvas _ignoresPanel = null!;
 
     protected override void OnInitialized()
     {

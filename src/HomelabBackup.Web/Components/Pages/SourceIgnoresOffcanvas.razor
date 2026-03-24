@@ -1,0 +1,406 @@
+@rendermode InteractiveServer
+@inject BackupConfig CurrentConfig
+@inject HomelabBackup.Web.Services.ConfigService ConfigService
+@using HomelabBackup.Core.Config
+@using HomelabBackup.Core.Infrastructure
+@using System.Text.RegularExpressions
+
+@if (_isOpen && _source is not null)
+{
+    <div class="offcanvas-backdrop fade show" @onclick="Close"></div>
+
+    <div class="offcanvas offcanvas-end show" tabindex="-1" style="width: min(600px, 95vw);">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">
+                <i class="bi bi-shield-check me-2"></i>Ignores &mdash; <strong>@_source.Name</strong>
+            </h5>
+            <button type="button" class="btn-close" @onclick="Close"></button>
+        </div>
+
+        <div class="offcanvas-body d-flex flex-column gap-4 overflow-auto">
+
+            <!-- Glob Patterns Section -->
+            <div>
+                <h6 class="fw-semibold mb-2">
+                    <i class="bi bi-funnel me-1"></i>Glob Patterns
+                </h6>
+                <p class="text-secondary small mb-2">
+                    Patterns are matched against each file's relative path and filename.
+                    Use <code>*</code> as a wildcard. Example: <code>cache/*</code>, <code>*.log</code>
+                </p>
+
+                @if (_editingExcludes.Count > 0)
+                {
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        @foreach (var pattern in _editingExcludes.ToList())
+                        {
+                            var p = pattern;
+                            <span class="badge rounded-pill d-flex align-items-center gap-1"
+                                  style="background: var(--accent); font-size: 0.8rem; padding: 0.4em 0.7em;">
+                                <code style="color: inherit;">@p</code>
+                                <button class="btn btn-link p-0 ms-1 text-white" style="line-height:1; font-size:1rem;"
+                                        @onclick="() => RemovePattern(p)" title="Remove">
+                                    &times;
+                                </button>
+                            </span>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p class="text-secondary small fst-italic mb-3">No patterns configured.</p>
+                }
+
+                <div class="input-group mb-2">
+                    <input type="text" class="form-control form-control-sm font-monospace"
+                           placeholder="e.g. *.tmp or cache/*"
+                           @bind="_newPattern"
+                           @onkeydown="OnPatternKeyDown" />
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="AddPattern">
+                        <i class="bi bi-plus-lg"></i> Add
+                    </button>
+                </div>
+
+                <div class="d-flex flex-wrap gap-1">
+                    <small class="text-secondary me-1 align-self-center">Quick add:</small>
+                    @foreach (var preset in _presets)
+                    {
+                        var pre = preset;
+                        <button class="btn btn-sm btn-outline-secondary py-0 px-2 font-monospace"
+                                style="font-size: 0.75rem;"
+                                @onclick="() => AddPreset(pre)"
+                                disabled="@(_editingExcludes.Contains(pre))">
+                            @pre
+                        </button>
+                    }
+                </div>
+            </div>
+
+            <!-- Directory Browser Section -->
+            <div class="flex-grow-1">
+                <h6 class="fw-semibold mb-1">
+                    <i class="bi bi-folder2-open me-1"></i>Browse Source
+                </h6>
+                <code class="text-secondary small d-block mb-2">@_source.Path</code>
+
+                @if (_loadError is not null)
+                {
+                    <div class="alert alert-warning py-2 small">
+                        <i class="bi bi-exclamation-triangle me-1"></i>@_loadError
+                    </div>
+                }
+                else if (_entries.Count == 0)
+                {
+                    <div class="text-secondary small fst-italic">Directory is empty or inaccessible.</div>
+                }
+                else
+                {
+                    <div class="border rounded" style="max-height: 420px; overflow-y: auto;">
+                        <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
+                            <tbody>
+                                @RenderEntries(_entries, 0)
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+
+        </div>
+
+        <div class="offcanvas-footer border-top px-3 py-2 d-flex justify-content-end gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="Close">Cancel</button>
+            <button class="btn btn-accent btn-sm" @onclick="Save">
+                <i class="bi bi-check-lg me-1"></i>Save Changes
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool _isOpen;
+    private SourceConfig? _source;
+    private List<string> _editingExcludes = [];
+    private string _newPattern = string.Empty;
+    private List<FsEntry> _entries = [];
+    private string? _loadError;
+
+    private static readonly string[] _presets =
+        ["*.tmp", "*.log", "*.bak", "node_modules/*", ".git/*", "__pycache__/*", ".DS_Store"];
+
+    private sealed class FsEntry
+    {
+        public required string Name { get; init; }
+        public required string RelativePath { get; init; }
+        public required bool IsDirectory { get; init; }
+        public List<FsEntry> Children { get; set; } = [];
+        public bool IsExpanded { get; set; }
+        public bool ChildrenLoaded { get; set; }
+        public string? LoadError { get; set; }
+    }
+
+    public void Open(SourceConfig source)
+    {
+        _source = source;
+        _editingExcludes = [..source.Exclude];
+        _newPattern = string.Empty;
+        _loadError = null;
+        _entries = [];
+        _isOpen = true;
+        LoadEntries(_source.Path, _entries, isRoot: true);
+        StateHasChanged();
+    }
+
+    private void Close()
+    {
+        _isOpen = false;
+        StateHasChanged();
+    }
+
+    // ── Pattern management ────────────────────────────────────────────────
+
+    private void AddPattern()
+    {
+        var p = _newPattern.Trim();
+        if (!string.IsNullOrEmpty(p) && !_editingExcludes.Contains(p))
+            _editingExcludes.Add(p);
+        _newPattern = string.Empty;
+    }
+
+    private void RemovePattern(string pattern) => _editingExcludes.Remove(pattern);
+
+    private void AddPreset(string preset)
+    {
+        if (!_editingExcludes.Contains(preset))
+            _editingExcludes.Add(preset);
+    }
+
+    private void OnPatternKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") AddPattern();
+    }
+
+    // ── Filesystem loading ────────────────────────────────────────────────
+
+    private void LoadEntries(string dirPath, List<FsEntry> target, bool isRoot = false)
+    {
+        try
+        {
+            var dirs = Directory.GetDirectories(dirPath)
+                .OrderBy(d => Path.GetFileName(d), StringComparer.OrdinalIgnoreCase)
+                .Select(d => new FsEntry
+                {
+                    Name = Path.GetFileName(d),
+                    RelativePath = GetRelative(d),
+                    IsDirectory = true
+                });
+
+            var files = Directory.GetFiles(dirPath)
+                .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                .Select(f => new FsEntry
+                {
+                    Name = Path.GetFileName(f),
+                    RelativePath = GetRelative(f),
+                    IsDirectory = false
+                });
+
+            foreach (var entry in dirs.Concat(files))
+                target.Add(entry);
+
+            if (isRoot && target.Count == 0)
+                _loadError = null; // empty dir is fine
+        }
+        catch (UnauthorizedAccessException)
+        {
+            if (isRoot) _loadError = "Permission denied — cannot read this directory.";
+        }
+        catch (Exception ex)
+        {
+            if (isRoot) _loadError = $"Error: {ex.Message}";
+        }
+    }
+
+    private string GetRelative(string fullPath)
+    {
+        if (_source is null) return fullPath;
+        return Path.GetRelativePath(_source.Path, fullPath).Replace('\\', '/');
+    }
+
+    private void ToggleExpand(FsEntry entry)
+    {
+        entry.IsExpanded = !entry.IsExpanded;
+        if (entry.IsExpanded && !entry.ChildrenLoaded)
+        {
+            entry.ChildrenLoaded = true;
+            var fullPath = Path.Combine(_source!.Path, entry.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            LoadEntries(fullPath, entry.Children);
+            if (entry.Children.Count == 0 && entry.LoadError is null)
+                entry.LoadError = "(empty)";
+        }
+    }
+
+    // ── Ignore status ─────────────────────────────────────────────────────
+
+    private bool IsIgnored(FsEntry entry)
+    {
+        if (_editingExcludes.Count == 0) return false;
+        var patterns = _editingExcludes.Select(ArchiveService.GlobToRegex).ToList();
+        var relPath = entry.IsDirectory ? entry.RelativePath + "/" : entry.RelativePath;
+        var name = entry.Name;
+        return patterns.Any(r => r.IsMatch(relPath) || r.IsMatch(name)
+            || (entry.IsDirectory && r.IsMatch(entry.RelativePath + "/*")));
+    }
+
+    private string GeneratePattern(FsEntry entry) =>
+        entry.IsDirectory ? $"{entry.RelativePath}/*" : entry.RelativePath;
+
+    private void IgnoreEntry(FsEntry entry)
+    {
+        var p = GeneratePattern(entry);
+        if (!_editingExcludes.Contains(p))
+            _editingExcludes.Add(p);
+    }
+
+    private void UnignoreEntry(FsEntry entry)
+    {
+        var p = GeneratePattern(entry);
+        _editingExcludes.Remove(p);
+    }
+
+    // ── Save ──────────────────────────────────────────────────────────────
+
+    private void Save()
+    {
+        if (_source is null) return;
+
+        var updatedSources = CurrentConfig.Sources
+            .Select(s => s.Name == _source.Name
+                ? new SourceConfig { Name = s.Name, Path = s.Path, Exclude = [.._editingExcludes] }
+                : s)
+            .ToList();
+
+        var updated = new BackupConfig
+        {
+            Ssh = CurrentConfig.Ssh,
+            Sources = updatedSources,
+            Destination = CurrentConfig.Destination,
+            Retention = CurrentConfig.Retention,
+            Compression = CurrentConfig.Compression,
+            Schedule = CurrentConfig.Schedule,
+            BrowseRoot = CurrentConfig.BrowseRoot
+        };
+
+        ConfigService.Save(updated);
+        _isOpen = false;
+        OnSaved.InvokeAsync();
+    }
+
+    // ── Render tree ───────────────────────────────────────────────────────
+
+    private RenderFragment RenderEntries(List<FsEntry> entries, int depth) => builder =>
+    {
+        foreach (var entry in entries)
+        {
+            var e = entry;
+            var ignored = IsIgnored(e);
+            var rowStyle = ignored
+                ? "background: rgba(var(--bs-warning-rgb), 0.08);"
+                : string.Empty;
+
+            builder.OpenElement(0, "tr");
+            builder.AddAttribute(1, "style", rowStyle);
+
+            // Indent + expand toggle
+            builder.OpenElement(2, "td");
+            builder.AddAttribute(3, "style", $"width:1px; white-space:nowrap; padding-left:{8 + depth * 20}px;");
+            if (e.IsDirectory)
+            {
+                builder.OpenElement(4, "button");
+                builder.AddAttribute(5, "class", "btn btn-link btn-sm p-0 text-secondary");
+                builder.AddAttribute(6, "style", "font-size:0.75rem; line-height:1;");
+                builder.AddAttribute(7, "onclick", EventCallback.Factory.Create(this, () => { ToggleExpand(e); StateHasChanged(); }));
+                builder.AddContent(8, e.IsExpanded ? "▼" : "▶");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            // Icon + name
+            builder.OpenElement(9, "td");
+            builder.AddAttribute(10, "style", "white-space:nowrap;");
+            builder.OpenElement(11, "i");
+            builder.AddAttribute(12, "class", e.IsDirectory
+                ? "bi bi-folder-fill me-1 text-warning"
+                : "bi bi-file-earmark me-1 text-secondary");
+            builder.CloseElement();
+            builder.AddContent(13, e.Name);
+            builder.CloseElement();
+
+            // Relative path (truncated)
+            builder.OpenElement(14, "td");
+            builder.AddAttribute(15, "class", "text-secondary font-monospace text-truncate");
+            builder.AddAttribute(16, "style", "max-width:160px; font-size:0.75rem;");
+            builder.AddAttribute(17, "title", e.RelativePath);
+            builder.AddContent(18, e.RelativePath);
+            builder.CloseElement();
+
+            // Status badge
+            builder.OpenElement(19, "td");
+            builder.AddAttribute(20, "style", "width:1px; white-space:nowrap;");
+            if (ignored)
+            {
+                builder.OpenElement(21, "span");
+                builder.AddAttribute(22, "class", "badge badge-warning");
+                builder.AddAttribute(23, "style", "font-size:0.7rem;");
+                builder.AddContent(24, "ignored");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            // Action button
+            builder.OpenElement(25, "td");
+            builder.AddAttribute(26, "style", "width:1px; white-space:nowrap;");
+            if (ignored)
+            {
+                builder.OpenElement(27, "button");
+                builder.AddAttribute(28, "class", "btn btn-sm btn-outline-warning py-0 px-2");
+                builder.AddAttribute(29, "style", "font-size:0.75rem;");
+                builder.AddAttribute(30, "onclick", EventCallback.Factory.Create(this, () => { UnignoreEntry(e); StateHasChanged(); }));
+                builder.AddContent(31, "Unignore");
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.OpenElement(32, "button");
+                builder.AddAttribute(33, "class", "btn btn-sm btn-outline-secondary py-0 px-2");
+                builder.AddAttribute(34, "style", "font-size:0.75rem;");
+                builder.AddAttribute(35, "onclick", EventCallback.Factory.Create(this, () => { IgnoreEntry(e); StateHasChanged(); }));
+                builder.AddContent(36, "Ignore");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            builder.CloseElement(); // tr
+
+            // Children (expanded)
+            if (e.IsDirectory && e.IsExpanded)
+            {
+                if (e.LoadError is not null)
+                {
+                    builder.OpenElement(37, "tr");
+                    builder.OpenElement(38, "td");
+                    builder.AddAttribute(39, "colspan", "5");
+                    builder.AddAttribute(40, "style", $"padding-left:{8 + (depth + 1) * 20}px; color: var(--text-secondary); font-size:0.8rem; font-style:italic;");
+                    builder.AddContent(41, e.LoadError);
+                    builder.CloseElement();
+                    builder.CloseElement();
+                }
+                else if (e.Children.Count > 0)
+                {
+                    var childFragment = RenderEntries(e.Children, depth + 1);
+                    builder.AddContent(42, childFragment);
+                }
+            }
+        }
+    };
+}
