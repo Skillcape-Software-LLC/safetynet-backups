@@ -228,10 +228,10 @@ public sealed class BackupEngine : IBackupEngine
 
     private async Task<string> ComputeRemoteFileHashAsync(string remotePath, CancellationToken ct)
     {
-        using var memoryStream = new MemoryStream();
-        await _sftp.DownloadToStreamAsync(remotePath, memoryStream, ct);
-        memoryStream.Position = 0;
-        var hash = await SHA256.HashDataAsync(memoryStream, ct);
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        using var sha256 = SHA256.Create();
+        using var hashStream = new CryptoStream(Stream.Null, sha256, CryptoStreamMode.Write);
+        await _sftp.DownloadToStreamAsync(remotePath, hashStream, ct);
+        await hashStream.FlushFinalBlockAsync(ct);
+        return Convert.ToHexString(sha256.Hash!).ToLowerInvariant();
     }
 }

@@ -2,6 +2,7 @@ services:
   backup-cli:
     image: ghcr.io/skillcape-software-llc/safetynet-backups/cli:latest
     user: "${PUID:-1000}:${PGID:-1000}"
+    command: ["sleep", "infinity"]  # Stay alive for docker exec; backups are scheduled via the web service
     volumes:
       - safetynet_data:/data  # SQLite database (shared with backup-web)
       - ./keys:/keys:ro
