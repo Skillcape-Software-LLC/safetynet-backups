@@ -2,9 +2,7 @@
 @rendermode InteractiveServer
 @inject BackupConfig CurrentConfig
 @inject HomelabBackup.Web.Services.ConfigService ConfigService
-@inject ILoggerFactory LoggerFactory
 @using HomelabBackup.Core.Config
-@using HomelabBackup.Core.Infrastructure
 
 <PageTitle>Config - HomelabBackup</PageTitle>
 
@@ -28,48 +26,15 @@
     </div>
 }
 
+<div class="alert alert-info py-2 mb-4">
+    <i class="bi bi-info-circle me-2"></i>
+    Backup destinations (SSH, Local, SMB) are managed on the <a href="destinations" class="alert-link">Destinations</a> tab.
+</div>
+
 <div class="row g-4">
-    <!-- SSH Section -->
+    <!-- Retention -->
     <div class="col-md-6">
         <div class="content-card">
-            <div class="card-header"><i class="bi bi-key me-2"></i>SSH Connection</div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">Host</label>
-                    <input type="text" class="form-control" @bind="_ssh.Host" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Port</label>
-                    <input type="number" class="form-control" @bind="_ssh.Port" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">User</label>
-                    <input type="text" class="form-control" @bind="_ssh.User" />
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Key Path</label>
-                    <input type="text" class="form-control" @bind="_ssh.KeyPath" />
-                </div>
-                <button class="btn btn-outline-secondary w-100 mt-1" @onclick="TestConnection" disabled="@_testRunning">
-                    <i class="bi bi-plug me-1"></i>@(_testRunning ? "Testing..." : "Test Connection")
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Destination & Retention -->
-    <div class="col-md-6">
-        <div class="content-card mb-3">
-            <div class="card-header"><i class="bi bi-hdd me-2"></i>Destination</div>
-            <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">Remote Path</label>
-                    <input type="text" class="form-control" @bind="_destPath" />
-                </div>
-            </div>
-        </div>
-
-        <div class="content-card mb-3">
             <div class="card-header"><i class="bi bi-clock-history me-2"></i>Retention</div>
             <div class="card-body">
                 <div class="row">
@@ -84,7 +49,10 @@
                 </div>
             </div>
         </div>
+    </div>
 
+    <!-- Options -->
+    <div class="col-md-6">
         <div class="content-card">
             <div class="card-header"><i class="bi bi-gear me-2"></i>Options</div>
             <div class="card-body">
@@ -215,23 +183,7 @@
     </div>
 }
 
-@if (_showTestOffcanvas)
-{
-    <div class="offcanvas-backdrop fade show" @onclick="() => _showTestOffcanvas = false"></div>
-    <div class="offcanvas offcanvas-end show" style="visibility:visible; width:460px">
-        <div class="offcanvas-header">
-            <h5 class="offcanvas-title"><i class="bi bi-terminal me-2"></i>Connection Test</h5>
-            <button class="btn-close" @onclick="() => _showTestOffcanvas = false"></button>
-        </div>
-        <div class="offcanvas-body">
-            <pre style="font-size:0.8rem; white-space:pre-wrap; margin:0">@string.Join("\n", _testLogs)</pre>
-        </div>
-    </div>
-}
-
 @code {
-    private SshConfig _ssh = new();
-    private string _destPath = "";
     private int _keepLast;
     private int _maxAgeDays;
     private string _compression = "optimal";
@@ -248,21 +200,9 @@
     private bool _showDiff;
     private string _currentYaml = "";
     private string _pendingYaml = "";
-    private bool _testRunning;
-    private bool _showTestOffcanvas;
-    private List<string> _testLogs = [];
 
     protected override void OnInitialized()
     {
-        // Copy current config to form
-        _ssh = new SshConfig
-        {
-            Host = CurrentConfig.Ssh.Host,
-            Port = CurrentConfig.Ssh.Port,
-            User = CurrentConfig.Ssh.User,
-            KeyPath = CurrentConfig.Ssh.KeyPath
-        };
-        _destPath = CurrentConfig.Destination.Path;
         _keepLast = CurrentConfig.Retention.KeepLast;
         _maxAgeDays = CurrentConfig.Retention.MaxAgeDays;
         _compression = CurrentConfig.Compression;
@@ -272,14 +212,14 @@
         {
             Name = s.Name,
             Path = s.Path,
-            Exclude = new List<string>(s.Exclude)
+            Exclude = new List<string>(s.Exclude),
+            DestinationId = s.DestinationId
         }).ToList();
         RefreshDiscovery();
     }
 
     private void RefreshDiscovery()
     {
-        // Default Docker named volumes (always scanned)
         _dockerDirs = [];
         _dockerDirError = null;
         try
@@ -295,7 +235,6 @@
             _dockerDirError = $"Cannot read '{DefaultDockerPath}': {ex.Message}";
         }
 
-        // Custom BrowseRoot (optional)
         _discoveredDirs = [];
         _browseError = null;
         if (string.IsNullOrWhiteSpace(_browseRoot)) return;
@@ -323,71 +262,10 @@
             _sources.RemoveAll(s => s.Path.Equals(fullPath, StringComparison.OrdinalIgnoreCase));
     }
 
-    private async Task TestConnection()
-    {
-        _testLogs = [];
-        _testRunning = true;
-        _showTestOffcanvas = true;
-        StateHasChanged();
-
-        var sshConfig = new SshConfig
-        {
-            Host = _ssh.Host,
-            Port = _ssh.Port,
-            User = _ssh.User,
-            KeyPath = _ssh.KeyPath
-        };
-
-        string? localTmp = null;
-        var sftp = new SftpService(sshConfig, LoggerFactory.CreateLogger<SftpService>());
-
-        void Log(string msg)
-        {
-            _testLogs.Add($"[{DateTime.Now:HH:mm:ss}] {msg}");
-            StateHasChanged();
-        }
-
-        try
-        {
-            Log($"Connecting to {sshConfig.Host}:{sshConfig.Port} as {sshConfig.User}...");
-            await sftp.ConnectAsync();
-            Log("Connected.");
-
-            var remotePath = $"{_destPath.TrimEnd('/')}/safetynet-test-{Guid.NewGuid():N}.tmp";
-            localTmp = Path.GetTempFileName();
-            await File.WriteAllTextAsync(localTmp, "safetynet connection test");
-
-            Log($"Creating temp file at {remotePath}...");
-            await sftp.UploadAsync(localTmp, remotePath);
-            Log("Temp file created.");
-
-            Log("Deleting temp file...");
-            await sftp.DeleteAsync(remotePath);
-            Log("Temp file deleted.");
-
-            Log("Disconnecting...");
-            await sftp.DisconnectAsync();
-            Log("Done. Connection test passed.");
-        }
-        catch (Exception ex)
-        {
-            Log($"ERROR: {ex.Message}");
-        }
-        finally
-        {
-            if (localTmp is not null && File.Exists(localTmp))
-                File.Delete(localTmp);
-            await sftp.DisposeAsync();
-            _testRunning = false;
-            StateHasChanged();
-        }
-    }
-
     private BackupConfig BuildConfig() => new()
     {
-        Ssh = _ssh,
+        Destinations = CurrentConfig.Destinations,
         Sources = _sources,
-        Destination = new DestinationConfig { Path = _destPath },
         Retention = new RetentionConfig { KeepLast = _keepLast, MaxAgeDays = _maxAgeDays },
         Compression = _compression,
         Schedule = string.IsNullOrWhiteSpace(_cron) ? null : new ScheduleConfig { Cron = _cron },
@@ -398,8 +276,8 @@
     {
         try
         {
-            _currentYaml = ConfigLoader.Serialize(CurrentConfig);   // saved (in-memory singleton)
-            _pendingYaml = ConfigLoader.Serialize(BuildConfig());    // form (unsaved changes)
+            _currentYaml = ConfigLoader.Serialize(CurrentConfig);
+            _pendingYaml = ConfigLoader.Serialize(BuildConfig());
             _showDiff = true;
         }
         catch (Exception ex)
@@ -415,9 +293,6 @@
         try
         {
             ConfigLoader.Validate(BuildConfig());
-            _error = null;
-            _saved = false;
-            // Show a quick success indicator
             StateHasChanged();
         }
         catch (ConfigurationException ex)

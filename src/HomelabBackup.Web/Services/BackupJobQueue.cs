@@ -11,6 +11,7 @@ public record BackupJob(
     bool DryRun,
     string? ArchiveFileName = null,
     string? DestinationPath = null,
+    int? DestinationId = null,
     CancellationTokenSource? Cts = null);
 
 public sealed class BackupJobQueue
@@ -29,10 +30,11 @@ public sealed class BackupJobQueue
         return (job.JobId, queued);
     }
 
-    public (Guid JobId, bool Queued) EnqueueRestore(string archiveFileName, string destinationPath)
+    public (Guid JobId, bool Queued) EnqueueRestore(string archiveFileName, string destinationPath, int? destinationId = null)
     {
         var job = new BackupJob(Guid.NewGuid(), BackupJobType.Restore, null, false,
             ArchiveFileName: archiveFileName, DestinationPath: destinationPath,
+            DestinationId: destinationId,
             Cts: new CancellationTokenSource());
         var queued = _channel.Writer.TryWrite(job);
         if (!queued) job.Cts?.Dispose();

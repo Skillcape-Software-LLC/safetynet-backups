@@ -15,4 +15,10 @@ public interface IConfigRepository
 
     /// <summary>Persists all settings and sources to the database (replaces sources entirely).</summary>
     void Save(BackupConfig config);
+
+    // --- Destination CRUD ---
+
+    List<DestinationConfig> GetDestinations();
+    int SaveDestination(DestinationConfig destination);
+    void DeleteDestination(int id);
 }

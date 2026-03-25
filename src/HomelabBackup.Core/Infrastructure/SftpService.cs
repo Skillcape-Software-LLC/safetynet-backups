@@ -5,13 +5,13 @@ using Renci.SshNet.Common;
 
 namespace HomelabBackup.Core.Infrastructure;
 
-public sealed class SftpService : ISftpService
+public sealed class SftpService : ITransferService
 {
-    private readonly SshConfig _config;
+    private readonly DestinationConfig _config;
     private readonly ILogger<SftpService> _logger;
     private SftpClient? _client;
 
-    public SftpService(SshConfig config, ILogger<SftpService> logger)
+    public SftpService(DestinationConfig config, ILogger<SftpService> logger)
     {
         _config = config;
         _logger = logger;
@@ -27,24 +27,28 @@ public sealed class SftpService : ISftpService
 
             var passphrase = Environment.GetEnvironmentVariable("BACKUP_KEY_PASSPHRASE");
             PrivateKeyFile keyFile;
+            var keyPath = _config.SshKeyPath ?? "/keys/id_ed25519";
 
             try
             {
                 keyFile = string.IsNullOrEmpty(passphrase)
-                    ? new PrivateKeyFile(_config.KeyPath)
-                    : new PrivateKeyFile(_config.KeyPath, passphrase);
+                    ? new PrivateKeyFile(keyPath)
+                    : new PrivateKeyFile(keyPath, passphrase);
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"Failed to load SSH key from '{_config.KeyPath}': {ex.Message}", ex);
+                throw new InvalidOperationException($"Failed to load SSH key from '{keyPath}': {ex.Message}", ex);
             }
 
-            var authMethod = new PrivateKeyAuthenticationMethod(_config.User, keyFile);
-            var connectionInfo = new ConnectionInfo(_config.Host, _config.Port, _config.User, authMethod);
+            var host = _config.SshHost ?? throw new InvalidOperationException("SSH host is not configured.");
+            var user = _config.SshUser ?? throw new InvalidOperationException("SSH user is not configured.");
+
+            var authMethod = new PrivateKeyAuthenticationMethod(user, keyFile);
+            var connectionInfo = new ConnectionInfo(host, _config.SshPort, user, authMethod);
 
             _client = new SftpClient(connectionInfo);
             _client.Connect();
-            _logger.LogInformation("Connected to SFTP host {Host}:{Port}", _config.Host, _config.Port);
+            _logger.LogInformation("Connected to SFTP host {Host}:{Port}", host, _config.SshPort);
         }, ct);
     }
 
@@ -53,7 +57,7 @@ public sealed class SftpService : ISftpService
         if (_client?.IsConnected == true)
         {
             _client.Disconnect();
-            _logger.LogInformation("Disconnected from SFTP host {Host}", _config.Host);
+            _logger.LogInformation("Disconnected from SFTP host {Host}", _config.SshHost);
         }
         return Task.CompletedTask;
     }
@@ -82,7 +86,7 @@ public sealed class SftpService : ISftpService
             ct.ThrowIfCancellationRequested();
             EnsureConnected();
 
-            var directory = Path.GetDirectoryName(localPath);
+            var directory = System.IO.Path.GetDirectoryName(localPath);
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
 
@@ -188,6 +192,32 @@ public sealed class SftpService : ISftpService
                 }
             }
         }, ct);
+    }
+
+    public async Task<bool> TestConnectionAsync(CancellationToken ct = default)
+    {
+        string? remoteTmpPath = null;
+        string? localTmp = null;
+        try
+        {
+            await ConnectAsync(ct);
+            remoteTmpPath = $"{_config.Path.TrimEnd('/')}/safetynet-test-{Guid.NewGuid():N}.tmp";
+            localTmp = System.IO.Path.GetTempFileName();
+            await File.WriteAllTextAsync(localTmp, "safetynet connection test", ct);
+            await UploadAsync(localTmp, remoteTmpPath, null, ct);
+            await DeleteAsync(remoteTmpPath, ct);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            try { await DisconnectAsync(); } catch { /* ignored */ }
+            if (localTmp is not null && File.Exists(localTmp))
+                File.Delete(localTmp);
+        }
     }
 
     private void EnsureConnected()

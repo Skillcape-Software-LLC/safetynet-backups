@@ -1,4 +1,5 @@
 using HomelabBackup.Core.Config;
+using HomelabBackup.Core.Infrastructure;
 using HomelabBackup.Core.Models;
 
 namespace HomelabBackup.Core.Engines;
@@ -12,6 +13,7 @@ public interface IRestoreEngine
     Task<BackupResult> RestoreLatestAsync(
         string sourceName,
         DestinationConfig remoteDestination,
+        ITransferService transfer,
         string? localDestination = null,
         IProgress<long>? progress = null,
         CancellationToken ct = default);
@@ -23,6 +25,7 @@ public interface IRestoreEngine
     Task<BackupResult> RestoreFileAsync(
         string archiveFileName,
         DestinationConfig remoteDestination,
+        ITransferService transfer,
         string? localDestination = null,
         IProgress<long>? progress = null,
         CancellationToken ct = default);

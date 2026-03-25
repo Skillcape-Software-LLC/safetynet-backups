@@ -282,9 +282,8 @@
 
         var updated = new BackupConfig
         {
-            Ssh = CurrentConfig.Ssh,
+            Destinations = CurrentConfig.Destinations,
             Sources = updatedSources,
-            Destination = CurrentConfig.Destination,
             Retention = CurrentConfig.Retention,
             Compression = CurrentConfig.Compression,
             Schedule = CurrentConfig.Schedule,

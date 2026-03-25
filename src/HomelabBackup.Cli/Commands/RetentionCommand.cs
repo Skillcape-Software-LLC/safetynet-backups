@@ -1,6 +1,7 @@
 using System.CommandLine;
 using HomelabBackup.Core.Config;
 using HomelabBackup.Core.Engines;
+using HomelabBackup.Core.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HomelabBackup.Cli.Commands;
@@ -15,7 +16,7 @@ public static class RetentionCommand
             DefaultValueFactory = _ => true
         };
 
-        var command = new Command("retention", "Apply retention policy to remote archives")
+        var command = new Command("retention", "Apply retention policy to archives")
         {
             Options = { dryRunOption }
         };
@@ -26,30 +27,50 @@ public static class RetentionCommand
 
             var config = services.GetRequiredService<BackupConfig>();
             var policy = services.GetRequiredService<IRetentionPolicy>();
+            var factory = services.GetRequiredService<TransferServiceFactory>();
 
-            var sourceNames = config.Sources.Select(s => s.Name).ToList();
+            if (config.Destinations.Count == 0)
+            {
+                Console.Error.WriteLine("No destinations configured.");
+                return;
+            }
 
             Console.WriteLine($"Retention policy: keep_last={config.Retention.KeepLast}, max_age_days={config.Retention.MaxAgeDays}");
             if (dryRun) Console.WriteLine("[DRY RUN MODE]");
             Console.WriteLine();
 
-            var result = await policy.ApplyAsync(config.Destination, config.Retention, sourceNames, dryRun, ct);
+            // Apply retention per destination
+            var sourcesByDestination = config.Sources
+                .GroupBy(s => s.DestinationId ?? config.Destinations.FirstOrDefault()?.Id)
+                .Where(g => g.Key.HasValue);
 
-            if (result.DeletedArchives.Count > 0)
+            foreach (var group in sourcesByDestination)
             {
-                Console.WriteLine("Archives to delete:");
-                foreach (var entry in result.DeletedArchives)
+                var dest = config.Destinations.FirstOrDefault(d => d.Id == group.Key);
+                if (dest is null) continue;
+
+                Console.WriteLine($"Destination: {dest.Name}");
+                using var transfer = factory.Create(dest);
+                var sourceNames = group.Select(s => s.Name).ToList();
+                var result = await policy.ApplyAsync(dest, transfer, config.Retention, sourceNames, dryRun, ct);
+
+                if (result.DeletedArchives.Count > 0)
                 {
-                    var age = (DateTime.UtcNow - entry.CreatedUtc).Days;
-                    Console.WriteLine($"  {entry.ArchiveFileName} (age: {age} days)");
+                    Console.WriteLine("  Archives to delete:");
+                    foreach (var entry in result.DeletedArchives)
+                    {
+                        var age = (DateTime.UtcNow - entry.CreatedUtc).Days;
+                        Console.WriteLine($"    {entry.ArchiveFileName} (age: {age} days)");
+                    }
                 }
-            }
-            else
-            {
-                Console.WriteLine("No archives to delete.");
-            }
+                else
+                {
+                    Console.WriteLine("  No archives to delete.");
+                }
 
-            Console.WriteLine($"\nRetained: {result.RetainedArchives.Count} | Deleted: {result.DeletedArchives.Count}");
+                Console.WriteLine($"  Retained: {result.RetainedArchives.Count} | Deleted: {result.DeletedArchives.Count}");
+                Console.WriteLine();
+            }
         });
 
         return command;

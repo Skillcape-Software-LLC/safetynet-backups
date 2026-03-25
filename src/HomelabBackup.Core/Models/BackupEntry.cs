@@ -6,4 +6,5 @@ public record BackupEntry(
     DateTime CreatedUtc,
     long CompressedBytes,
     int FileCount = 0,
-    string? SourcePath = null);
+    string? SourcePath = null,
+    int? DestinationId = null);

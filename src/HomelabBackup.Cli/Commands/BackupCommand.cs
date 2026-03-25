@@ -1,6 +1,7 @@
 using System.CommandLine;
 using HomelabBackup.Core.Config;
 using HomelabBackup.Core.Engines;
+using HomelabBackup.Core.Infrastructure;
 using HomelabBackup.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,7 +14,7 @@ public static class BackupCommand
         var sourceOption = new Option<string?>("--source") { Description = "Back up a specific source (default: all)" };
         var dryRunOption = new Option<bool>("--dry-run") { Description = "Show what would be backed up without transferring" };
 
-        var command = new Command("backup", "Back up configured sources to remote host")
+        var command = new Command("backup", "Back up configured sources to their configured destinations")
         {
             Options = { sourceOption, dryRunOption }
         };
@@ -25,10 +26,17 @@ public static class BackupCommand
 
             var config = services.GetRequiredService<BackupConfig>();
             var engine = services.GetRequiredService<IBackupEngine>();
+            var factory = services.GetRequiredService<TransferServiceFactory>();
 
             if (config.Sources.Count == 0)
             {
-                Console.Error.WriteLine("No sources configured. Add sources in backup.yml or via the Config page.");
+                Console.Error.WriteLine("No sources configured. Add sources via the Config page.");
+                return;
+            }
+
+            if (config.Destinations.Count == 0)
+            {
+                Console.Error.WriteLine("No destinations configured. Add a destination via the Destinations page.");
                 return;
             }
 
@@ -61,8 +69,16 @@ public static class BackupCommand
             var sourceList = sources.ToList();
             foreach (var s in sourceList)
             {
-                Console.WriteLine($"\nBacking up: {s.Name} ({s.Path})");
-                var result = await engine.RunAsync(s, config.Destination, config.Compression, dryRun, progress, ct: ct);
+                var destination = ResolveDestination(s, config);
+                if (destination is null)
+                {
+                    Console.Error.WriteLine($"No destination configured for source '{s.Name}' — skipping.");
+                    continue;
+                }
+
+                Console.WriteLine($"\nBacking up: {s.Name} ({s.Path}) → {destination.Name}");
+                using var transfer = factory.Create(destination);
+                var result = await engine.RunAsync(s, destination, transfer, config.Compression, dryRun, progress, ct: ct);
                 Console.WriteLine();
 
                 if (result.Success)
@@ -84,12 +100,31 @@ public static class BackupCommand
             {
                 Console.WriteLine("\nApplying retention policy...");
                 var policy = services.GetRequiredService<IRetentionPolicy>();
-                var sourceNames = sourceList.Select(s => s.Name).ToList();
-                var retentionResult = await policy.ApplyAsync(config.Destination, config.Retention, sourceNames, dryRun: false, ct);
-                Console.WriteLine($"  Retention: {retentionResult.DeletedArchives.Count} deleted, {retentionResult.RetainedArchives.Count} retained");
+
+                var sourcesByDestination = sourceList
+                    .GroupBy(s => s.DestinationId ?? config.Destinations.FirstOrDefault()?.Id)
+                    .Where(g => g.Key.HasValue);
+
+                foreach (var group in sourcesByDestination)
+                {
+                    var dest = config.Destinations.FirstOrDefault(d => d.Id == group.Key);
+                    if (dest is null) continue;
+
+                    using var transfer = factory.Create(dest);
+                    var sourceNames = group.Select(s => s.Name).ToList();
+                    var retentionResult = await policy.ApplyAsync(dest, transfer, config.Retention, sourceNames, dryRun: false, ct);
+                    Console.WriteLine($"  [{dest.Name}] Retention: {retentionResult.DeletedArchives.Count} deleted, {retentionResult.RetainedArchives.Count} retained");
+                }
             }
         });
 
         return command;
+    }
+
+    private static DestinationConfig? ResolveDestination(SourceConfig source, BackupConfig config)
+    {
+        if (source.DestinationId.HasValue)
+            return config.Destinations.FirstOrDefault(d => d.Id == source.DestinationId.Value);
+        return config.Destinations.FirstOrDefault();
     }
 }

@@ -1,6 +1,6 @@
 namespace HomelabBackup.Core.Infrastructure;
 
-public interface ISftpService : IAsyncDisposable, IDisposable
+public interface ITransferService : IAsyncDisposable, IDisposable
 {
     Task ConnectAsync(CancellationToken ct = default);
     Task DisconnectAsync();
@@ -11,5 +11,6 @@ public interface ISftpService : IAsyncDisposable, IDisposable
     Task<IReadOnlyList<string>> ListSubdirectoriesAsync(string remotePath, CancellationToken ct = default);
     Task DeleteAsync(string remotePath, CancellationToken ct = default);
     Task EnsureDirectoryExistsAsync(string remotePath, CancellationToken ct = default);
+    Task<bool> TestConnectionAsync(CancellationToken ct = default);
     bool IsConnected { get; }
 }

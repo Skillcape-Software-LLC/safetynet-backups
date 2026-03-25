@@ -46,7 +46,7 @@ var services = new ServiceCollection()
     .AddHomelabBackupCore(config)
     .BuildServiceProvider();
 
-var rootCommand = new RootCommand("HomelabBackup — backup local directories to a remote host via SFTP");
+var rootCommand = new RootCommand("SafetyNet — backup local directories to configured destinations");
 rootCommand.Subcommands.Add(BackupCommand.Create(services));
 rootCommand.Subcommands.Add(RestoreCommand.Create(services));
 rootCommand.Subcommands.Add(ListCommand.Create(services));

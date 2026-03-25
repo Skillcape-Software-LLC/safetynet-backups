@@ -1,6 +1,7 @@
 using Cronos;
 using HomelabBackup.Core.Config;
 using HomelabBackup.Core.Engines;
+using HomelabBackup.Core.Infrastructure;
 using HomelabBackup.Core.Models;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,7 @@ public sealed class SchedulerService : IHostedService, IDisposable
     private readonly BackupConfig _config;
     private readonly IBackupEngine _backupEngine;
     private readonly IRetentionPolicy _retentionPolicy;
+    private readonly TransferServiceFactory _transferFactory;
     private readonly ILogger<SchedulerService> _logger;
     private CancellationTokenSource? _cts;
     private Task? _runningTask;
@@ -32,11 +34,13 @@ public sealed class SchedulerService : IHostedService, IDisposable
         BackupConfig config,
         IBackupEngine backupEngine,
         IRetentionPolicy retentionPolicy,
+        TransferServiceFactory transferFactory,
         ILogger<SchedulerService> logger)
     {
         _config = config;
         _backupEngine = backupEngine;
         _retentionPolicy = retentionPolicy;
+        _transferFactory = transferFactory;
         _logger = logger;
     }
 
@@ -117,11 +121,19 @@ public sealed class SchedulerService : IHostedService, IDisposable
 
             foreach (var source in _config.Sources)
             {
+                var destination = ResolveDestination(source);
+                if (destination is null)
+                {
+                    _logger.LogWarning("No destination configured for source '{SourceName}' — skipping", source.Name);
+                    continue;
+                }
+
                 try
                 {
+                    using var transfer = _transferFactory.Create(destination);
                     var progress = ProgressFactory?.Invoke(source.Name);
                     var result = await _backupEngine.RunAsync(
-                        source, _config.Destination, _config.Compression,
+                        source, destination, transfer, _config.Compression,
                         dryRun: false, progress: progress, ct: ct);
 
                     OnResultCompleted?.Invoke(result);
@@ -138,20 +150,36 @@ public sealed class SchedulerService : IHostedService, IDisposable
                 }
             }
 
-            // Run retention after all backups
-            try
+            // Run retention per destination group after all backups
+            var sourcesByDestination = _config.Sources
+                .GroupBy(s => s.DestinationId ?? _config.Destinations.FirstOrDefault()?.Id)
+                .Where(g => g.Key.HasValue);
+
+            foreach (var group in sourcesByDestination)
             {
-                var sourceNames = _config.Sources.Select(s => s.Name).ToList();
-                await _retentionPolicy.ApplyAsync(
-                    _config.Destination, _config.Retention, sourceNames,
-                    dryRun: false, ct: ct);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Scheduled retention policy failed");
+                var dest = _config.Destinations.FirstOrDefault(d => d.Id == group.Key);
+                if (dest is null) continue;
+
+                try
+                {
+                    using var transfer = _transferFactory.Create(dest);
+                    var sourceNames = group.Select(s => s.Name).ToList();
+                    await _retentionPolicy.ApplyAsync(dest, transfer, _config.Retention, sourceNames, dryRun: false, ct: ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Scheduled retention policy failed for destination '{DestName}'", dest.Name);
+                }
             }
         }
+    }
+
+    private DestinationConfig? ResolveDestination(SourceConfig source)
+    {
+        if (source.DestinationId.HasValue)
+            return _config.Destinations.FirstOrDefault(d => d.Id == source.DestinationId.Value);
+        return _config.Destinations.FirstOrDefault();
     }
 
     public void Dispose()

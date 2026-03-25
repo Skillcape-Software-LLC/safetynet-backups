@@ -2,16 +2,15 @@ using YamlDotNet.Serialization;
 
 namespace HomelabBackup.Core.Config;
 
+public enum DestinationType { Ssh, Local, Smb }
+
 public class BackupConfig
 {
-    [YamlMember(Alias = "ssh")]
-    public SshConfig Ssh { get; set; } = new();
+    [YamlMember(Alias = "destinations")]
+    public List<DestinationConfig> Destinations { get; set; } = [];
 
     [YamlMember(Alias = "sources")]
     public List<SourceConfig> Sources { get; set; } = [];
-
-    [YamlMember(Alias = "destination")]
-    public DestinationConfig Destination { get; set; } = new();
 
     [YamlMember(Alias = "retention")]
     public RetentionConfig Retention { get; set; } = new();
@@ -26,19 +25,47 @@ public class BackupConfig
     public string? BrowseRoot { get; set; }
 }
 
-public class SshConfig
+public class DestinationConfig
 {
-    [YamlMember(Alias = "host")]
-    public string Host { get; set; } = string.Empty;
+    public int Id { get; set; }
 
-    [YamlMember(Alias = "port")]
-    public int Port { get; set; } = 22;
+    [YamlMember(Alias = "name")]
+    public string Name { get; set; } = string.Empty;
 
-    [YamlMember(Alias = "user")]
-    public string User { get; set; } = string.Empty;
+    [YamlMember(Alias = "type")]
+    public DestinationType Type { get; set; } = DestinationType.Ssh;
 
-    [YamlMember(Alias = "key_path")]
-    public string KeyPath { get; set; } = "/keys/id_ed25519";
+    [YamlMember(Alias = "path")]
+    public string Path { get; set; } = string.Empty;
+
+    // SSH fields
+    [YamlMember(Alias = "ssh_host")]
+    public string? SshHost { get; set; }
+
+    [YamlMember(Alias = "ssh_port")]
+    public int SshPort { get; set; } = 22;
+
+    [YamlMember(Alias = "ssh_user")]
+    public string? SshUser { get; set; }
+
+    [YamlMember(Alias = "ssh_key_path")]
+    public string? SshKeyPath { get; set; }
+
+    // SMB fields
+    [YamlMember(Alias = "smb_host")]
+    public string? SmbHost { get; set; }
+
+    [YamlMember(Alias = "smb_share")]
+    public string? SmbShare { get; set; }
+
+    [YamlMember(Alias = "smb_domain")]
+    public string? SmbDomain { get; set; }
+
+    [YamlMember(Alias = "smb_username")]
+    public string? SmbUsername { get; set; }
+
+    [YamlMember(Alias = "smb_password")]
+    public string? SmbPassword { get; set; }
 }
 
 public class SourceConfig
@@ -51,12 +78,9 @@ public class SourceConfig
 
     [YamlMember(Alias = "exclude")]
     public List<string> Exclude { get; set; } = [];
-}
 
-public class DestinationConfig
-{
-    [YamlMember(Alias = "path")]
-    public string Path { get; set; } = string.Empty;
+    [YamlMember(Alias = "destination_id")]
+    public int? DestinationId { get; set; }
 }
 
 public class RetentionConfig

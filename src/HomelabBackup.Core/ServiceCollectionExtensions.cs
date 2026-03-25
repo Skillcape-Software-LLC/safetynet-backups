@@ -1,5 +1,4 @@
 using HomelabBackup.Core.Config;
-using HomelabBackup.Core.Data;
 using HomelabBackup.Core.Engines;
 using HomelabBackup.Core.Infrastructure;
 using HomelabBackup.Core.Services;
@@ -13,16 +12,15 @@ public static class ServiceCollectionExtensions
     {
         // Config as singleton (refreshed in-place when UI saves)
         services.AddSingleton(config);
-        services.AddSingleton(config.Ssh);
 
-        // Infrastructure — transient SFTP (new connection per operation)
-        services.AddTransient<ISftpService, SftpService>();
+        // Infrastructure
+        services.AddSingleton<TransferServiceFactory>();
         services.AddSingleton<IArchiveService, ArchiveService>();
 
         // Services
         services.AddSingleton<IManifestService, ManifestService>();
 
-        // Engines
+        // Engines — transient; receive ITransferService via method parameters, not DI injection
         services.AddTransient<IBackupEngine, BackupEngine>();
         services.AddTransient<IRestoreEngine, RestoreEngine>();
         services.AddTransient<IRetentionPolicy, RetentionPolicy>();

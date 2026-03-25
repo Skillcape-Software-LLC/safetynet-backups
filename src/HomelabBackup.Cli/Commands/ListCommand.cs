@@ -12,67 +12,76 @@ public static class ListCommand
     public static Command Create(IServiceProvider services)
     {
         var sourceOption = new Option<string?>("--source") { Description = "Filter by source name" };
+        var destinationOption = new Option<string?>("--destination") { Description = "Destination name to list from (default: all destinations)" };
 
-        var command = new Command("list", "List remote backup archives")
+        var command = new Command("list", "List backup archives")
         {
-            Options = { sourceOption }
+            Options = { sourceOption, destinationOption }
         };
 
         command.SetAction(async (parseResult, ct) =>
         {
             var source = parseResult.GetValue(sourceOption);
+            var destinationName = parseResult.GetValue(destinationOption);
 
             var config = services.GetRequiredService<BackupConfig>();
-            var sftp = services.GetRequiredService<ISftpService>();
+            var factory = services.GetRequiredService<TransferServiceFactory>();
             var manifestService = services.GetRequiredService<IManifestService>();
 
-            await sftp.ConnectAsync(ct);
-
-            var sourceNames = await sftp.ListSubdirectoriesAsync(config.Destination.Path, ct);
-
-            if (source is not null)
-                sourceNames = sourceNames.Where(s => s.Equals(source, StringComparison.OrdinalIgnoreCase)).ToList();
-
-            if (sourceNames.Count == 0)
+            if (config.Destinations.Count == 0)
             {
-                Console.WriteLine(source is not null
-                    ? $"No archives found for source '{source}'."
-                    : "No archives found on remote. Run a backup first.");
-                await sftp.DisconnectAsync();
+                Console.Error.WriteLine("No destinations configured.");
                 return;
             }
 
+            var destinations = destinationName is not null
+                ? config.Destinations.Where(d => d.Name.Equals(destinationName, StringComparison.OrdinalIgnoreCase)).ToList()
+                : config.Destinations;
+
             var entries = new List<BackupEntry>();
 
-            foreach (var name in sourceNames)
+            foreach (var dest in destinations)
             {
-                var remoteDir = $"{config.Destination.Path}/{name}";
-                try
+                using var transfer = factory.Create(dest);
+                await transfer.ConnectAsync(ct);
+
+                var sourceNames = await transfer.ListSubdirectoriesAsync(dest.Path, ct);
+
+                if (source is not null)
+                    sourceNames = sourceNames.Where(s => s.Equals(source, StringComparison.OrdinalIgnoreCase)).ToList();
+
+                foreach (var name in sourceNames)
                 {
-                    var files = await sftp.ListDirectoryAsync(remoteDir, ct);
-                    var manifests = files.Where(f => f.Name.EndsWith(".manifest.json", StringComparison.OrdinalIgnoreCase));
-
-                    foreach (var mf in manifests)
+                    var remoteDir = $"{dest.Path}/{name}";
+                    try
                     {
-                        using var stream = new MemoryStream();
-                        await sftp.DownloadToStreamAsync(mf.FullPath, stream, ct);
-                        stream.Position = 0;
-                        var manifest = await manifestService.ReadFromStreamAsync(stream, ct);
+                        var files = await transfer.ListDirectoryAsync(remoteDir, ct);
+                        var manifests = files.Where(f => f.Name.EndsWith(".manifest.json", StringComparison.OrdinalIgnoreCase));
 
-                        entries.Add(new BackupEntry(name, manifest.ArchiveFileName, manifest.CreatedUtc, manifest.CompressedBytes, manifest.Files.Count));
+                        foreach (var mf in manifests)
+                        {
+                            using var stream = new MemoryStream();
+                            await transfer.DownloadToStreamAsync(mf.FullPath, stream, ct);
+                            stream.Position = 0;
+                            var manifest = await manifestService.ReadFromStreamAsync(stream, ct);
+                            entries.Add(new BackupEntry(name, manifest.ArchiveFileName, manifest.CreatedUtc,
+                                manifest.CompressedBytes, manifest.Files.Count, DestinationId: dest.Id));
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.Error.WriteLine($"  Warning: could not list '{name}' on '{dest.Name}': {ex.Message}");
                     }
                 }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"  Warning: could not list '{name}': {ex.Message}");
-                }
-            }
 
-            await sftp.DisconnectAsync();
+                await transfer.DisconnectAsync();
+            }
 
             if (entries.Count == 0)
             {
-                Console.WriteLine("No archives found.");
+                Console.WriteLine(source is not null
+                    ? $"No archives found for source '{source}'."
+                    : "No archives found. Run a backup first.");
                 return;
             }
 

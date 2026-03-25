@@ -42,19 +42,6 @@ public static class ConfigLoader
 
     public static void Validate(BackupConfig config)
     {
-        if (string.IsNullOrWhiteSpace(config.Ssh.Host))
-            throw new ConfigurationException("SSH host is required.");
-
-        if (config.Ssh.Port is < 1 or > 65535)
-            throw new ConfigurationException("SSH port must be between 1 and 65535.");
-
-        if (string.IsNullOrWhiteSpace(config.Ssh.User))
-            throw new ConfigurationException("SSH user is required.");
-
-        if (string.IsNullOrWhiteSpace(config.Ssh.KeyPath))
-            throw new ConfigurationException("SSH key path is required.");
-
-
         foreach (var source in config.Sources)
         {
             if (string.IsNullOrWhiteSpace(source.Name))
@@ -62,9 +49,6 @@ public static class ConfigLoader
             if (string.IsNullOrWhiteSpace(source.Path))
                 throw new ConfigurationException($"Source '{source.Name}' must have a path.");
         }
-
-        if (string.IsNullOrWhiteSpace(config.Destination.Path))
-            throw new ConfigurationException("Destination path is required.");
 
         if (!ValidCompressionValues.Contains(config.Compression, StringComparer.OrdinalIgnoreCase))
             throw new ConfigurationException(
@@ -86,6 +70,42 @@ public static class ConfigLoader
             {
                 throw new ConfigurationException($"Invalid cron expression '{config.Schedule.Cron}': {ex.Message}", ex);
             }
+        }
+    }
+
+    public static void ValidateDestination(DestinationConfig dest)
+    {
+        if (string.IsNullOrWhiteSpace(dest.Name))
+            throw new ConfigurationException("Destination name is required.");
+
+        if (string.IsNullOrWhiteSpace(dest.Path))
+            throw new ConfigurationException($"Destination '{dest.Name}' must have a path.");
+
+        switch (dest.Type)
+        {
+            case DestinationType.Ssh:
+                if (string.IsNullOrWhiteSpace(dest.SshHost))
+                    throw new ConfigurationException($"SSH destination '{dest.Name}': host is required.");
+                if (dest.SshPort is < 1 or > 65535)
+                    throw new ConfigurationException($"SSH destination '{dest.Name}': port must be between 1 and 65535.");
+                if (string.IsNullOrWhiteSpace(dest.SshUser))
+                    throw new ConfigurationException($"SSH destination '{dest.Name}': user is required.");
+                if (string.IsNullOrWhiteSpace(dest.SshKeyPath))
+                    throw new ConfigurationException($"SSH destination '{dest.Name}': key path is required.");
+                break;
+
+            case DestinationType.Smb:
+                if (string.IsNullOrWhiteSpace(dest.SmbHost))
+                    throw new ConfigurationException($"SMB destination '{dest.Name}': host is required.");
+                if (string.IsNullOrWhiteSpace(dest.SmbShare))
+                    throw new ConfigurationException($"SMB destination '{dest.Name}': share name is required.");
+                if (string.IsNullOrWhiteSpace(dest.SmbUsername))
+                    throw new ConfigurationException($"SMB destination '{dest.Name}': username is required.");
+                break;
+
+            case DestinationType.Local:
+                // path validation already covered above
+                break;
         }
     }
 

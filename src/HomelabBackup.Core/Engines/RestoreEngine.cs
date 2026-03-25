@@ -9,18 +9,15 @@ namespace HomelabBackup.Core.Engines;
 
 public sealed class RestoreEngine : IRestoreEngine
 {
-    private readonly ISftpService _sftp;
     private readonly IArchiveService _archive;
     private readonly IManifestService _manifest;
     private readonly ILogger<RestoreEngine> _logger;
 
     public RestoreEngine(
-        ISftpService sftp,
         IArchiveService archive,
         IManifestService manifest,
         ILogger<RestoreEngine> logger)
     {
-        _sftp = sftp;
         _archive = archive;
         _manifest = manifest;
         _logger = logger;
@@ -29,16 +26,17 @@ public sealed class RestoreEngine : IRestoreEngine
     public async Task<BackupResult> RestoreLatestAsync(
         string sourceName,
         DestinationConfig remoteDestination,
+        ITransferService transfer,
         string? localDestination = null,
         IProgress<long>? progress = null,
         CancellationToken ct = default)
     {
         try
         {
-            await _sftp.ConnectAsync(ct);
+            await transfer.ConnectAsync(ct);
             var remoteDir = $"{remoteDestination.Path}/{sourceName}";
 
-            var files = await _sftp.ListDirectoryAsync(remoteDir, ct);
+            var files = await transfer.ListDirectoryAsync(remoteDir, ct);
             var manifests = files.Where(f => f.Name.EndsWith(".manifest.json", StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(f => f.LastModifiedUtc)
                 .ToList();
@@ -47,18 +45,18 @@ public sealed class RestoreEngine : IRestoreEngine
                 throw new InvalidOperationException($"No backups found for source '{sourceName}'");
 
             using var manifestStream = new MemoryStream();
-            await _sftp.DownloadToStreamAsync(manifests[0].FullPath, manifestStream, ct);
+            await transfer.DownloadToStreamAsync(manifests[0].FullPath, manifestStream, ct);
             manifestStream.Position = 0;
             var manifest = await _manifest.ReadFromStreamAsync(manifestStream, ct);
 
-            await _sftp.DisconnectAsync();
+            await transfer.DisconnectAsync();
 
             var destination = localDestination ?? manifest.SourcePath;
-            return await RestoreFileAsync(manifest.ArchiveFileName, remoteDestination, destination, progress, ct);
+            return await RestoreFileAsync(manifest.ArchiveFileName, remoteDestination, transfer, destination, progress, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await _sftp.DisconnectAsync();
+            await transfer.DisconnectAsync();
             throw;
         }
     }
@@ -66,6 +64,7 @@ public sealed class RestoreEngine : IRestoreEngine
     public async Task<BackupResult> RestoreFileAsync(
         string archiveFileName,
         DestinationConfig remoteDestination,
+        ITransferService transfer,
         string? localDestination = null,
         IProgress<long>? progress = null,
         CancellationToken ct = default)
@@ -84,18 +83,18 @@ public sealed class RestoreEngine : IRestoreEngine
         {
             try
             {
-                await _sftp.ConnectAsync(ct);
+                await transfer.ConnectAsync(ct);
                 var manifestPath = $"{remoteDir}/{_manifest.GetManifestFileName(archiveFileName)}";
                 using var manifestStream = new MemoryStream();
-                await _sftp.DownloadToStreamAsync(manifestPath, manifestStream, ct);
+                await transfer.DownloadToStreamAsync(manifestPath, manifestStream, ct);
                 manifestStream.Position = 0;
                 var manifest = await _manifest.ReadFromStreamAsync(manifestStream, ct);
                 localDestination = manifest.SourcePath;
-                await _sftp.DisconnectAsync();
+                await transfer.DisconnectAsync();
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                await _sftp.DisconnectAsync();
+                await transfer.DisconnectAsync();
                 throw new InvalidOperationException(
                     $"Could not determine restore destination: manifest not found for '{archiveFileName}'. Specify --dest explicitly.", ex);
             }
@@ -112,9 +111,9 @@ public sealed class RestoreEngine : IRestoreEngine
 
             _logger.LogInformation("Restoring {ArchiveFileName} to {Destination}", archiveFileName, canonicalDest);
 
-            await _sftp.ConnectAsync(ct);
-            await _sftp.DownloadAsync(remoteZipPath, tempZipPath, progress, ct);
-            await _sftp.DisconnectAsync();
+            await transfer.ConnectAsync(ct);
+            await transfer.DownloadAsync(remoteZipPath, tempZipPath, progress, ct);
+            await transfer.DisconnectAsync();
 
             await _archive.ExtractArchiveAsync(tempZipPath, canonicalDest, ct);
 
@@ -167,7 +166,7 @@ public sealed class RestoreEngine : IRestoreEngine
             }
             catch { /* best effort cleanup */ }
 
-            await _sftp.DisconnectAsync();
+            await transfer.DisconnectAsync();
         }
     }
 }

@@ -71,6 +71,26 @@ else
                                 Excludes: @string.Join(", ", source.Exclude)
                             </p>
                         }
+                        @if (Config.Destinations.Count > 1)
+                        {
+                            <div class="mb-2">
+                                <label class="form-label small text-secondary mb-1">Destination</label>
+                                <select class="form-select form-select-sm"
+                                        value="@(source.DestinationId?.ToString() ?? "")"
+                                        @onchange="e => SetDestination(source.Name, e.Value?.ToString())">
+                                    @foreach (var dest in Config.Destinations)
+                                    {
+                                        <option value="@dest.Id">@dest.Name (@dest.Type)</option>
+                                    }
+                                </select>
+                            </div>
+                        }
+                        else if (Config.Destinations.Count == 1)
+                        {
+                            <p class="text-secondary small mb-2">
+                                <i class="bi bi-hdd-network me-1"></i>@Config.Destinations[0].Name
+                            </p>
+                        }
 
                         @if (progress is not null && isActive)
                         {
@@ -200,6 +220,12 @@ else
     }
 
     private void ConfirmBackupAll() => _showConfirmAll = true;
+
+    private void SetDestination(string sourceName, string? destinationIdStr)
+    {
+        int? id = int.TryParse(destinationIdStr, out var parsed) ? parsed : null;
+        ConfigService.SetSourceDestination(sourceName, id);
+    }
 
     private void CancelSource(string sourceName)
     {

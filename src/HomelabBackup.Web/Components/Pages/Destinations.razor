@@ -1,0 +1,423 @@
+@page "/destinations"
+@rendermode InteractiveServer
+@inject BackupConfig Config
+@inject HomelabBackup.Web.Services.ConfigService ConfigService
+@inject ILoggerFactory LoggerFactory
+@using HomelabBackup.Core.Config
+@using HomelabBackup.Core.Infrastructure
+
+<PageTitle>Destinations - HomelabBackup</PageTitle>
+
+<div class="page-header">
+    <h2>Destinations</h2>
+    <button class="btn btn-accent" @onclick="OpenAddForm">
+        <i class="bi bi-plus-lg me-1"></i>Add Destination
+    </button>
+</div>
+
+@if (_successMessage is not null)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-2"></i>@_successMessage
+        <button type="button" class="btn-close" @onclick="() => _successMessage = null"></button>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle me-2"></i>@_error
+        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+    </div>
+}
+
+@if (Config.Destinations.Count == 0)
+{
+    <div class="content-card">
+        <div class="card-body text-center py-5">
+            <i class="bi bi-hdd-network" style="font-size: 3rem; color: var(--text-secondary);"></i>
+            <p class="mt-3 text-secondary">No destinations configured. Add one to start backing up.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var dest in Config.Destinations)
+        {
+            <div class="col-sm-6 col-lg-4">
+                <div class="content-card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>
+                            @DestinationIcon(dest.Type)
+                            @dest.Name
+                        </span>
+                        <span class="badge @TypeBadgeClass(dest.Type)">@dest.Type.ToString().ToUpperInvariant()</span>
+                    </div>
+                    <div class="card-body">
+                        <p class="mb-1 text-secondary small">
+                            <i class="bi bi-folder me-1"></i><code>@dest.Path</code>
+                        </p>
+
+                        @if (dest.Type == DestinationType.Ssh)
+                        {
+                            <p class="mb-1 text-secondary small">
+                                <i class="bi bi-hdd-network me-1"></i>@dest.SshUser@@@@dest.SshHost:@dest.SshPort
+                            </p>
+                            <p class="mb-0 text-secondary small">
+                                <i class="bi bi-key me-1"></i>@dest.SshKeyPath
+                            </p>
+                        }
+                        else if (dest.Type == DestinationType.Smb)
+                        {
+                            <p class="mb-1 text-secondary small">
+                                <i class="bi bi-hdd-network me-1"></i>\\@dest.SmbHost\@dest.SmbShare
+                            </p>
+                            <p class="mb-0 text-secondary small">
+                                <i class="bi bi-person me-1"></i>
+                                @(string.IsNullOrEmpty(dest.SmbDomain) ? "" : $"{dest.SmbDomain}\\")@dest.SmbUsername
+                            </p>
+                        }
+                        else
+                        {
+                            <p class="mb-0 text-secondary small">Local directory backup</p>
+                        }
+
+                        <div class="mt-3 d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenEditForm(dest)">
+                                <i class="bi bi-pencil me-1"></i>Edit
+                            </button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => TestDestination(dest)">
+                                <i class="bi bi-plug me-1"></i>Test
+                            </button>
+                            <button class="btn btn-sm btn-outline-danger ms-auto" @onclick="() => ConfirmDelete(dest)">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+<!-- Add/Edit Offcanvas -->
+@if (_showForm)
+{
+    <div class="offcanvas-backdrop fade show" @onclick="CloseForm"></div>
+    <div class="offcanvas offcanvas-end show" style="visibility:visible; width:480px">
+        <div class="offcanvas-header">
+            <h5 class="offcanvas-title">
+                <i class="bi bi-hdd-network me-2"></i>@(_editingDest?.Id > 0 ? "Edit" : "Add") Destination
+            </h5>
+            <button class="btn-close" @onclick="CloseForm"></button>
+        </div>
+        <div class="offcanvas-body">
+            @if (_formError is not null)
+            {
+                <div class="alert alert-danger py-2">
+                    <i class="bi bi-exclamation-triangle me-1"></i>@_formError
+                </div>
+            }
+
+            <div class="mb-3">
+                <label class="form-label">Name</label>
+                <input type="text" class="form-control" @bind="_formName" placeholder="e.g. NAS Backup" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Type</label>
+                <select class="form-select" @bind="_formType" @bind:after="OnTypeChanged">
+                    <option value="@DestinationType.Ssh">SSH / SFTP</option>
+                    <option value="@DestinationType.Local">Local Directory</option>
+                    <option value="@DestinationType.Smb">SMB / Network Share</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">
+                    @(_formType == DestinationType.Ssh ? "Remote Path" :
+                      _formType == DestinationType.Smb ? "Share Path" : "Directory Path")
+                </label>
+                <input type="text" class="form-control" @bind="_formPath"
+                       placeholder="@(_formType == DestinationType.Ssh ? "/backups" :
+                                      _formType == DestinationType.Smb ? "/backups" : "/mnt/backup")" />
+            </div>
+
+            @if (_formType == DestinationType.Ssh)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Host</label>
+                    <input type="text" class="form-control" @bind="_formSshHost" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Port</label>
+                    <input type="number" class="form-control" @bind="_formSshPort" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">User</label>
+                    <input type="text" class="form-control" @bind="_formSshUser" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Key Path</label>
+                    <input type="text" class="form-control" @bind="_formSshKeyPath" placeholder="/keys/id_ed25519" />
+                </div>
+            }
+            else if (_formType == DestinationType.Smb)
+            {
+                <div class="mb-3">
+                    <label class="form-label">Host</label>
+                    <input type="text" class="form-control" @bind="_formSmbHost" placeholder="192.168.1.100" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Share Name</label>
+                    <input type="text" class="form-control" @bind="_formSmbShare" placeholder="backups" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Domain (optional)</label>
+                    <input type="text" class="form-control" @bind="_formSmbDomain" placeholder="WORKGROUP" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-control" @bind="_formSmbUsername" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-control" @bind="_formSmbPassword" />
+                </div>
+            }
+
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-accent" @onclick="SaveForm">
+                    <i class="bi bi-save me-1"></i>Save
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="() => TestFormDest()" disabled="@_testRunning">
+                    <i class="bi bi-plug me-1"></i>@(_testRunning ? "Testing..." : "Test Connection")
+                </button>
+                <button class="btn btn-secondary ms-auto" @onclick="CloseForm">Cancel</button>
+            </div>
+
+            @if (_testLogs.Count > 0)
+            {
+                <div class="mt-3 p-3 bg-dark rounded">
+                    <pre style="font-size:0.8rem; white-space:pre-wrap; margin:0; color:#ccc">@string.Join("\n", _testLogs)</pre>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<!-- Delete Confirmation Modal -->
+@if (_deleteTarget is not null)
+{
+    <div class="modal d-block" tabindex="-1" style="background: rgba(0,0,0,0.5);">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Delete Destination</h5>
+                    <button type="button" class="btn-close" @onclick="() => _deleteTarget = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Are you sure you want to delete <strong>@_deleteTarget.Name</strong>?</p>
+                    <p class="text-warning">Sources assigned to this destination will fall back to the default destination.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="() => _deleteTarget = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="ExecuteDelete">
+                        <i class="bi bi-trash me-1"></i>Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _showForm;
+    private DestinationConfig? _editingDest;
+    private string? _successMessage;
+    private string? _error;
+    private string? _formError;
+    private DestinationConfig? _deleteTarget;
+    private bool _testRunning;
+    private List<string> _testLogs = [];
+
+    // Form fields
+    private string _formName = "";
+    private DestinationType _formType = DestinationType.Ssh;
+    private string _formPath = "";
+    private string _formSshHost = "";
+    private int _formSshPort = 22;
+    private string _formSshUser = "";
+    private string _formSshKeyPath = "/keys/id_ed25519";
+    private string _formSmbHost = "";
+    private string _formSmbShare = "";
+    private string _formSmbDomain = "";
+    private string _formSmbUsername = "";
+    private string _formSmbPassword = "";
+
+    private void OpenAddForm()
+    {
+        _editingDest = null;
+        _formName = "";
+        _formType = DestinationType.Ssh;
+        _formPath = "";
+        _formSshHost = "";
+        _formSshPort = 22;
+        _formSshUser = "";
+        _formSshKeyPath = "/keys/id_ed25519";
+        _formSmbHost = "";
+        _formSmbShare = "";
+        _formSmbDomain = "";
+        _formSmbUsername = "";
+        _formSmbPassword = "";
+        _formError = null;
+        _testLogs = [];
+        _showForm = true;
+    }
+
+    private void OpenEditForm(DestinationConfig dest)
+    {
+        _editingDest = dest;
+        _formName = dest.Name;
+        _formType = dest.Type;
+        _formPath = dest.Path;
+        _formSshHost = dest.SshHost ?? "";
+        _formSshPort = dest.SshPort;
+        _formSshUser = dest.SshUser ?? "";
+        _formSshKeyPath = dest.SshKeyPath ?? "/keys/id_ed25519";
+        _formSmbHost = dest.SmbHost ?? "";
+        _formSmbShare = dest.SmbShare ?? "";
+        _formSmbDomain = dest.SmbDomain ?? "";
+        _formSmbUsername = dest.SmbUsername ?? "";
+        _formSmbPassword = dest.SmbPassword ?? "";
+        _formError = null;
+        _testLogs = [];
+        _showForm = true;
+    }
+
+    private void CloseForm()
+    {
+        _showForm = false;
+        _editingDest = null;
+    }
+
+    private void OnTypeChanged() { /* re-render with new type fields */ }
+
+    private void SaveForm()
+    {
+        _formError = null;
+        try
+        {
+            var dest = BuildFormDestination();
+            var id = ConfigService.SaveDestination(dest);
+            _successMessage = $"Destination '{dest.Name}' saved successfully.";
+            _showForm = false;
+        }
+        catch (Exception ex)
+        {
+            _formError = ex.Message;
+        }
+    }
+
+    private async Task TestFormDest()
+    {
+        _testLogs = [];
+        _testRunning = true;
+        _formError = null;
+        StateHasChanged();
+
+        var dest = BuildFormDestination();
+
+        void Log(string msg)
+        {
+            _testLogs.Add($"[{DateTime.Now:HH:mm:ss}] {msg}");
+            InvokeAsync(StateHasChanged);
+        }
+
+        try
+        {
+            Log($"Testing {dest.Type} destination '{dest.Name}'...");
+            using var transfer = new TransferServiceFactory(LoggerFactory).Create(dest);
+            var passed = await transfer.TestConnectionAsync();
+            Log(passed ? "Connection test passed." : "Connection test FAILED.");
+        }
+        catch (Exception ex)
+        {
+            Log($"ERROR: {ex.Message}");
+        }
+        finally
+        {
+            _testRunning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task TestDestination(DestinationConfig dest)
+    {
+        _error = null;
+        _successMessage = null;
+
+        try
+        {
+            using var transfer = new TransferServiceFactory(LoggerFactory).Create(dest);
+            var passed = await transfer.TestConnectionAsync();
+            if (passed)
+                _successMessage = $"Connection test for '{dest.Name}' passed.";
+            else
+                _error = $"Connection test for '{dest.Name}' failed.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Connection test error: {ex.Message}";
+        }
+    }
+
+    private void ConfirmDelete(DestinationConfig dest) => _deleteTarget = dest;
+
+    private void ExecuteDelete()
+    {
+        if (_deleteTarget is null) return;
+        try
+        {
+            ConfigService.DeleteDestination(_deleteTarget.Id);
+            _successMessage = $"Destination '{_deleteTarget.Name}' deleted.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Delete failed: {ex.Message}";
+        }
+        _deleteTarget = null;
+    }
+
+    private DestinationConfig BuildFormDestination() => new()
+    {
+        Id = _editingDest?.Id ?? 0,
+        Name = _formName,
+        Type = _formType,
+        Path = _formPath,
+        SshHost = _formType == DestinationType.Ssh ? _formSshHost : null,
+        SshPort = _formType == DestinationType.Ssh ? _formSshPort : 22,
+        SshUser = _formType == DestinationType.Ssh ? _formSshUser : null,
+        SshKeyPath = _formType == DestinationType.Ssh ? _formSshKeyPath : null,
+        SmbHost = _formType == DestinationType.Smb ? _formSmbHost : null,
+        SmbShare = _formType == DestinationType.Smb ? _formSmbShare : null,
+        SmbDomain = _formType == DestinationType.Smb ? _formSmbDomain : null,
+        SmbUsername = _formType == DestinationType.Smb ? _formSmbUsername : null,
+        SmbPassword = _formType == DestinationType.Smb ? _formSmbPassword : null,
+    };
+
+    private static RenderFragment DestinationIcon(DestinationType type) => type switch
+    {
+        DestinationType.Ssh => @<i class="bi bi-hdd-network me-2"></i>,
+        DestinationType.Local => @<i class="bi bi-hdd me-2"></i>,
+        DestinationType.Smb => @<i class="bi bi-share me-2"></i>,
+        _ => @<i class="bi bi-hdd me-2"></i>
+    };
+
+    private static string TypeBadgeClass(DestinationType type) => type switch
+    {
+        DestinationType.Ssh => "bg-primary",
+        DestinationType.Local => "bg-success",
+        DestinationType.Smb => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+}

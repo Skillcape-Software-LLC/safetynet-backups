@@ -12,18 +12,15 @@ public sealed class BackupEngine : IBackupEngine
 {
     private const int MaxRetries = 2;
 
-    private readonly ISftpService _sftp;
     private readonly IArchiveService _archive;
     private readonly IManifestService _manifest;
     private readonly ILogger<BackupEngine> _logger;
 
     public BackupEngine(
-        ISftpService sftp,
         IArchiveService archive,
         IManifestService manifest,
         ILogger<BackupEngine> logger)
     {
-        _sftp = sftp;
         _archive = archive;
         _manifest = manifest;
         _logger = logger;
@@ -32,6 +29,7 @@ public sealed class BackupEngine : IBackupEngine
     public async Task<BackupResult> RunAsync(
         SourceConfig source,
         DestinationConfig destination,
+        ITransferService transfer,
         string compression,
         bool dryRun,
         IProgress<BackupProgressEvent>? progress = null,
@@ -46,8 +44,8 @@ public sealed class BackupEngine : IBackupEngine
         try
         {
             // Sanity-check destination reachability before spending time compressing
-            await _sftp.ConnectAsync(ct);
-            await _sftp.DisconnectAsync();
+            await transfer.ConnectAsync(ct);
+            await transfer.DisconnectAsync();
 
             // Scan + Compress (serialized via semaphore when running in parallel)
             var compressionLevel = ArchiveService.ParseCompressionLevel(compression);
@@ -101,8 +99,8 @@ public sealed class BackupEngine : IBackupEngine
             var remoteZipPath = $"{remoteDir}/{archiveFileName}";
             var remoteManifestPath = $"{remoteDir}/{manifestFileName}";
 
-            await _sftp.ConnectAsync(ct);
-            await _sftp.EnsureDirectoryExistsAsync(remoteDir, ct);
+            await transfer.ConnectAsync(ct);
+            await transfer.EnsureDirectoryExistsAsync(remoteDir, ct);
 
             int retryCount = 0;
             bool verified = false;
@@ -120,14 +118,14 @@ public sealed class BackupEngine : IBackupEngine
                     source.Name, archiveFileName, archiveResult.Files.Count, archiveResult.Files.Count,
                     archiveResult.CompressedBytes, BackupPhase.Transferring));
 
-                await _sftp.UploadAsync(tempZipPath, remoteZipPath, null, ct);
+                await transfer.UploadAsync(tempZipPath, remoteZipPath, null, ct);
 
                 // Verify
                 progress?.Report(new BackupProgressEvent(
                     source.Name, archiveFileName, archiveResult.Files.Count, archiveResult.Files.Count,
                     archiveResult.CompressedBytes, BackupPhase.Verifying));
 
-                var remoteHash = await ComputeRemoteFileHashAsync(remoteZipPath, ct);
+                var remoteHash = await ComputeRemoteFileHashAsync(transfer, remoteZipPath, ct);
                 _logger.LogDebug("Remote archive hash: {Hash}", remoteHash);
 
                 if (string.Equals(localHash, remoteHash, StringComparison.OrdinalIgnoreCase))
@@ -141,7 +139,7 @@ public sealed class BackupEngine : IBackupEngine
                         archiveFileName, localHash, remoteHash);
 
                     // Delete corrupted remote file
-                    try { await _sftp.DeleteAsync(remoteZipPath, ct); }
+                    try { await transfer.DeleteAsync(remoteZipPath, ct); }
                     catch (Exception ex) { _logger.LogWarning(ex, "Failed to delete corrupted remote file"); }
 
                     retryCount++;
@@ -171,7 +169,7 @@ public sealed class BackupEngine : IBackupEngine
             }
 
             // Upload manifest (small file, no retry needed)
-            await _sftp.UploadAsync(tempManifestPath, remoteManifestPath, null, ct);
+            await transfer.UploadAsync(tempManifestPath, remoteManifestPath, null, ct);
 
             stopwatch.Stop();
 
@@ -232,7 +230,7 @@ public sealed class BackupEngine : IBackupEngine
                 _logger.LogWarning(ex, "Failed to clean up temp directory {TempDir}", tempDir);
             }
 
-            await _sftp.DisconnectAsync();
+            await transfer.DisconnectAsync();
         }
     }
 
@@ -243,11 +241,11 @@ public sealed class BackupEngine : IBackupEngine
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private async Task<string> ComputeRemoteFileHashAsync(string remotePath, CancellationToken ct)
+    private static async Task<string> ComputeRemoteFileHashAsync(ITransferService transfer, string remotePath, CancellationToken ct)
     {
         using var sha256 = SHA256.Create();
         using var hashStream = new CryptoStream(Stream.Null, sha256, CryptoStreamMode.Write);
-        await _sftp.DownloadToStreamAsync(remotePath, hashStream, ct);
+        await transfer.DownloadToStreamAsync(remotePath, hashStream, ct);
         await hashStream.FlushFinalBlockAsync(ct);
         return Convert.ToHexString(sha256.Hash!).ToLowerInvariant();
     }

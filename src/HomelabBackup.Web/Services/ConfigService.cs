@@ -9,7 +9,6 @@ namespace HomelabBackup.Web.Services;
 /// </summary>
 public sealed class ConfigService(
     BackupConfig currentConfig,
-    SshConfig currentSsh,
     IConfigRepository repository)
 {
     /// <summary>
@@ -23,26 +22,59 @@ public sealed class ConfigService(
         Refresh(incoming);
     }
 
+    /// <summary>
+    /// Validates, saves or updates a destination, and refreshes the in-memory destination list.
+    /// Returns the destination ID (new or existing).
+    /// </summary>
+    public int SaveDestination(DestinationConfig destination)
+    {
+        ConfigLoader.ValidateDestination(destination);
+        var id = repository.SaveDestination(destination);
+        destination.Id = id;
+        RefreshDestinations();
+        return id;
+    }
+
+    /// <summary>
+    /// Deletes a destination and updates all sources that referenced it.
+    /// </summary>
+    public void DeleteDestination(int id)
+    {
+        repository.DeleteDestination(id);
+        RefreshDestinations();
+
+        // Null out DestinationId on in-memory sources that pointed to this destination
+        foreach (var source in currentConfig.Sources.Where(s => s.DestinationId == id))
+            source.DestinationId = null;
+    }
+
+    /// <summary>
+    /// Updates the destination assignment for a source and persists it.
+    /// </summary>
+    public void SetSourceDestination(string sourceName, int? destinationId)
+    {
+        var source = currentConfig.Sources.FirstOrDefault(
+            s => s.Name.Equals(sourceName, StringComparison.OrdinalIgnoreCase));
+        if (source is null) return;
+
+        source.DestinationId = destinationId;
+        repository.Save(currentConfig);
+    }
+
     private void Refresh(BackupConfig from)
     {
-        // SSH — update the registered SshConfig singleton (shared with SftpService)
-        currentSsh.Host = from.Ssh.Host;
-        currentSsh.Port = from.Ssh.Port;
-        currentSsh.User = from.Ssh.User;
-        currentSsh.KeyPath = from.Ssh.KeyPath;
-
-        // Keep BackupConfig.Ssh in sync (it points to the same object, but be explicit)
-        currentConfig.Ssh.Host = from.Ssh.Host;
-        currentConfig.Ssh.Port = from.Ssh.Port;
-        currentConfig.Ssh.User = from.Ssh.User;
-        currentConfig.Ssh.KeyPath = from.Ssh.KeyPath;
-
         currentConfig.Sources = from.Sources;
-        currentConfig.Destination.Path = from.Destination.Path;
         currentConfig.Retention.KeepLast = from.Retention.KeepLast;
         currentConfig.Retention.MaxAgeDays = from.Retention.MaxAgeDays;
         currentConfig.Compression = from.Compression;
         currentConfig.Schedule = from.Schedule;
         currentConfig.BrowseRoot = from.BrowseRoot;
+    }
+
+    private void RefreshDestinations()
+    {
+        var fresh = repository.GetDestinations();
+        currentConfig.Destinations.Clear();
+        currentConfig.Destinations.AddRange(fresh);
     }
 }

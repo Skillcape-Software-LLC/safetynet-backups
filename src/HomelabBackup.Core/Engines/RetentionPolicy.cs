@@ -8,19 +8,18 @@ namespace HomelabBackup.Core.Engines;
 
 public sealed class RetentionPolicy : IRetentionPolicy
 {
-    private readonly ISftpService _sftp;
     private readonly IManifestService _manifest;
     private readonly ILogger<RetentionPolicy> _logger;
 
-    public RetentionPolicy(ISftpService sftp, IManifestService manifest, ILogger<RetentionPolicy> logger)
+    public RetentionPolicy(IManifestService manifest, ILogger<RetentionPolicy> logger)
     {
-        _sftp = sftp;
         _manifest = manifest;
         _logger = logger;
     }
 
     public async Task<RetentionResult> ApplyAsync(
         DestinationConfig destination,
+        ITransferService transfer,
         RetentionConfig retention,
         IReadOnlyList<string> sourceNames,
         bool dryRun,
@@ -31,7 +30,7 @@ public sealed class RetentionPolicy : IRetentionPolicy
 
         try
         {
-            await _sftp.ConnectAsync(ct);
+            await transfer.ConnectAsync(ct);
 
             foreach (var sourceName in sourceNames)
             {
@@ -40,7 +39,7 @@ public sealed class RetentionPolicy : IRetentionPolicy
                 IReadOnlyList<RemoteFileInfo> files;
                 try
                 {
-                    files = await _sftp.ListDirectoryAsync(remoteDir, ct);
+                    files = await transfer.ListDirectoryAsync(remoteDir, ct);
                 }
                 catch
                 {
@@ -59,7 +58,7 @@ public sealed class RetentionPolicy : IRetentionPolicy
                     try
                     {
                         using var stream = new MemoryStream();
-                        await _sftp.DownloadToStreamAsync(mf.FullPath, stream, ct);
+                        await transfer.DownloadToStreamAsync(mf.FullPath, stream, ct);
                         stream.Position = 0;
                         var manifest = await _manifest.ReadFromStreamAsync(stream, ct);
 
@@ -102,8 +101,8 @@ public sealed class RetentionPolicy : IRetentionPolicy
 
                             try
                             {
-                                await _sftp.DeleteAsync(remoteZipPath, ct);
-                                await _sftp.DeleteAsync(remoteManifestPath, ct);
+                                await transfer.DeleteAsync(remoteZipPath, ct);
+                                await transfer.DeleteAsync(remoteManifestPath, ct);
                                 _logger.LogInformation("Deleted {ArchiveFileName} (age: {Age} days)",
                                     entry.ArchiveFileName, (DateTime.UtcNow - entry.CreatedUtc).Days);
                             }
@@ -123,7 +122,7 @@ public sealed class RetentionPolicy : IRetentionPolicy
         }
         finally
         {
-            await _sftp.DisconnectAsync();
+            await transfer.DisconnectAsync();
         }
 
         return new RetentionResult(allDeleted, allRetained);
