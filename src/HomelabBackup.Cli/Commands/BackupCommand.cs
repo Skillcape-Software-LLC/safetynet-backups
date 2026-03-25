@@ -62,7 +62,7 @@ public static class BackupCommand
             foreach (var s in sourceList)
             {
                 Console.WriteLine($"\nBacking up: {s.Name} ({s.Path})");
-                var result = await engine.RunAsync(s, config.Destination, config.Compression, dryRun, progress, ct);
+                var result = await engine.RunAsync(s, config.Destination, config.Compression, dryRun, progress, ct: ct);
                 Console.WriteLine();
 
                 if (result.Success)
