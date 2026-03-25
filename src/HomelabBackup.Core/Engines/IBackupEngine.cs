@@ -11,5 +11,6 @@ public interface IBackupEngine
         string compression,
         bool dryRun,
         IProgress<BackupProgressEvent>? progress = null,
+        SemaphoreSlim? compressionSemaphore = null,
         CancellationToken ct = default);
 }

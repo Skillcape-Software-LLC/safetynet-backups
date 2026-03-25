@@ -70,7 +70,6 @@ public sealed class BackupWorkerService : BackgroundService
     private async Task HandleBackupAsync(BackupJob job, CancellationToken ct)
     {
         using var scope = _services.CreateScope();
-        var engine = scope.ServiceProvider.GetRequiredService<IBackupEngine>();
         var config = scope.ServiceProvider.GetRequiredService<BackupConfig>();
 
         var sources = config.Sources.AsEnumerable();
@@ -78,31 +77,44 @@ public sealed class BackupWorkerService : BackgroundService
             sources = sources.Where(s => s.Name.Equals(job.SourceName, StringComparison.OrdinalIgnoreCase));
 
         var sourceList = sources.ToList();
-        foreach (var source in sourceList)
-        {
-            _logger.LogInformation("Starting backup for {SourceName} (JobId: {JobId})", source.Name, job.JobId);
-            var progress = _state.CreateProgress(source.Name);
 
-            var result = await engine.RunAsync(
-                source, config.Destination, config.Compression,
-                job.DryRun, progress, ct);
+        // One zip at a time (CPU-bound), but uploads run in parallel (network I/O-bound)
+        using var compressionSemaphore = new SemaphoreSlim(1);
 
-            _state.ReportCompletion(result);
-
-            if (result.Success)
-                _logger.LogInformation("Backup completed for {SourceName}: {ArchiveFileName}", source.Name, result.ArchiveFileName);
-            else
-                _logger.LogError("Backup failed for {SourceName}: {Error}", source.Name, result.ErrorMessage);
-        }
+        await Task.WhenAll(sourceList.Select(source =>
+            BackupSourceAsync(source, config, job.JobId, job.DryRun, compressionSemaphore, ct)));
 
         if (!job.DryRun)
         {
-            var policy = scope.ServiceProvider.GetRequiredService<IRetentionPolicy>();
+            using var retentionScope = _services.CreateScope();
+            var policy = retentionScope.ServiceProvider.GetRequiredService<IRetentionPolicy>();
             var sourceNames = sourceList.Select(s => s.Name).ToList();
             var retentionResult = await policy.ApplyAsync(config.Destination, config.Retention, sourceNames, dryRun: false, ct);
             _logger.LogInformation("Retention applied: {Deleted} deleted, {Retained} retained",
                 retentionResult.DeletedArchives.Count, retentionResult.RetainedArchives.Count);
         }
+    }
+
+    private async Task BackupSourceAsync(
+        SourceConfig source, BackupConfig config, Guid jobId, bool dryRun,
+        SemaphoreSlim compressionSemaphore, CancellationToken ct)
+    {
+        using var scope = _services.CreateScope();
+        var engine = scope.ServiceProvider.GetRequiredService<IBackupEngine>();
+
+        _logger.LogInformation("Starting backup for {SourceName} (JobId: {JobId})", source.Name, jobId);
+        var progress = _state.CreateProgress(source.Name);
+
+        var result = await engine.RunAsync(
+            source, config.Destination, config.Compression,
+            dryRun, progress, compressionSemaphore, ct);
+
+        _state.ReportCompletion(result);
+
+        if (result.Success)
+            _logger.LogInformation("Backup completed for {SourceName}: {ArchiveFileName}", source.Name, result.ArchiveFileName);
+        else
+            _logger.LogError("Backup failed for {SourceName}: {Error}", source.Name, result.ErrorMessage);
     }
 
     private async Task HandleRestoreAsync(BackupJob job, CancellationToken ct)

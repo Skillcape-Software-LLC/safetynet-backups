@@ -35,6 +35,7 @@ public sealed class BackupEngine : IBackupEngine
         string compression,
         bool dryRun,
         IProgress<BackupProgressEvent>? progress = null,
+        SemaphoreSlim? compressionSemaphore = null,
         CancellationToken ct = default)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -44,11 +45,27 @@ public sealed class BackupEngine : IBackupEngine
 
         try
         {
-            // Scan + Compress
+            // Sanity-check destination reachability before spending time compressing
+            await _sftp.ConnectAsync(ct);
+            await _sftp.DisconnectAsync();
+
+            // Scan + Compress (serialized via semaphore when running in parallel)
             var compressionLevel = ArchiveService.ParseCompressionLevel(compression);
-            var archiveResult = await _archive.CreateArchiveAsync(
-                source.Path, tempZipPath, compressionLevel, source.Exclude,
-                progress, source.Name, ct);
+
+            if (compressionSemaphore is not null)
+                await compressionSemaphore.WaitAsync(ct);
+
+            ArchiveResult archiveResult;
+            try
+            {
+                archiveResult = await _archive.CreateArchiveAsync(
+                    source.Path, tempZipPath, compressionLevel, source.Exclude,
+                    progress, source.Name, ct);
+            }
+            finally
+            {
+                compressionSemaphore?.Release();
+            }
 
             if (dryRun)
             {
