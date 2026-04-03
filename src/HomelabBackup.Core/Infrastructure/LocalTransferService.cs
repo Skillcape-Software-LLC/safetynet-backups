@@ -34,8 +34,8 @@ public sealed class LocalTransferService : ITransferService
         if (!string.IsNullOrEmpty(destDir))
             Directory.CreateDirectory(destDir);
 
-        using var source = File.OpenRead(localPath);
-        using var dest = File.Create(remotePath);
+        await using var source = File.OpenRead(localPath);
+        await using var dest = File.Create(remotePath);
 
         var buffer = new byte[81920];
         long totalBytes = 0;
@@ -48,6 +48,7 @@ public sealed class LocalTransferService : ITransferService
             progress?.Report(totalBytes);
         }
 
+        await dest.FlushAsync(ct);
         _logger.LogDebug("Copied {LocalPath} → {RemotePath}", localPath, remotePath);
     }
 
@@ -57,8 +58,8 @@ public sealed class LocalTransferService : ITransferService
         if (!string.IsNullOrEmpty(destDir))
             Directory.CreateDirectory(destDir);
 
-        using var source = File.OpenRead(remotePath);
-        using var dest = File.Create(localPath);
+        await using var source = File.OpenRead(remotePath);
+        await using var dest = File.Create(localPath);
 
         var buffer = new byte[81920];
         long totalBytes = 0;
@@ -71,6 +72,7 @@ public sealed class LocalTransferService : ITransferService
             progress?.Report(totalBytes);
         }
 
+        await dest.FlushAsync(ct);
         _logger.LogDebug("Copied {RemotePath} → {LocalPath}", remotePath, localPath);
     }
 

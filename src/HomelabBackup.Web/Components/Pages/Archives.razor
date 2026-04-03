@@ -113,10 +113,13 @@ else
                 </div>
                 <div class="modal-body">
                     <p>Restoring: <code>@_restoreTarget.ArchiveFileName</code></p>
-                    <p class="mb-0 text-secondary">
-                        <i class="bi bi-folder-check me-1"></i>
-                        Files will be written to <strong>@_restoreTarget.SourceName</strong> inside your configured restore directory.
-                    </p>
+                    <div class="mb-0">
+                        <label class="form-label">
+                            <i class="bi bi-folder-check me-1"></i>Restore destination
+                        </label>
+                        <input type="text" class="form-control" @bind="_restoreDest" />
+                        <div class="form-text">Files will be extracted to this directory.</div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="() => _restoreTarget = null">Cancel</button>
@@ -176,21 +179,8 @@ else
 
         try
         {
-            // Group sources by their destination
-            var sourcesByDest = Config.Sources
-                .GroupBy(s => s.DestinationId ?? Config.Destinations.FirstOrDefault()?.Id)
-                .Where(g => g.Key.HasValue)
-                .ToList();
-
-            // Also include any destinations that have archives but no source assigned
-            var coveredDestIds = sourcesByDest.Select(g => g.Key).ToHashSet();
-            var allDestIds = new HashSet<int?>(sourcesByDest.Select(g => g.Key));
-
-            foreach (var group in sourcesByDest)
+            foreach (var dest in Config.Destinations)
             {
-                var dest = Config.Destinations.FirstOrDefault(d => d.Id == group.Key);
-                if (dest is null) continue;
-
                 try
                 {
                     using var transfer = TransferFactory.Create(dest);
@@ -243,7 +233,9 @@ else
     private void ShowRestoreDialog(BackupEntry archive)
     {
         _restoreTarget = archive;
-        _restoreDest = $"/restores/{archive.SourceName}";
+        _restoreDest = !string.IsNullOrWhiteSpace(archive.SourcePath)
+            ? archive.SourcePath
+            : $"/restores/{archive.SourceName}";
     }
 
     private void ConfirmDelete(BackupEntry archive) => _deleteTarget = archive;
