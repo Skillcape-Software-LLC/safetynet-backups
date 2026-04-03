@@ -13,6 +13,8 @@ services:
       - ${DOCKER_DIR:-/tmp}:/browse:ro
       # Set RESTORE_DIR in .env to the directory where restores should be written
       - ${RESTORE_DIR:-/tmp}:/restores
+      # Set LOCAL_BACKUP_DIR in .env for local-directory backup destinations
+      - ${LOCAL_BACKUP_DIR:-/tmp}:/local-backups
     environment:
       - DB_PATH=/data/safetynet.db
       - BACKUP_KEY_PASSPHRASE=ociH00713!
@@ -33,6 +35,8 @@ services:
       - ${DOCKER_DIR:-/tmp}:/browse:ro
       # Set RESTORE_DIR in .env to the directory where restores should be written
       - ${RESTORE_DIR:-/tmp}:/restores
+      # Set LOCAL_BACKUP_DIR in .env for local-directory backup destinations
+      - ${LOCAL_BACKUP_DIR:-/tmp}:/local-backups
     environment:
       - DB_PATH=/data/safetynet.db
       - BACKUP_KEY_PASSPHRASE=ociH00713!

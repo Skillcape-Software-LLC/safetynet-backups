@@ -9,20 +9,30 @@ namespace HomelabBackup.Core.Infrastructure;
 /// </summary>
 public sealed class LocalTransferService : ITransferService
 {
+    private const string MountRoot = "/local-backups";
+
     private readonly DestinationConfig _config;
     private readonly ILogger<LocalTransferService> _logger;
+    private readonly string _basePath;
 
     public LocalTransferService(DestinationConfig config, ILogger<LocalTransferService> logger)
     {
         _config = config;
         _logger = logger;
+        _basePath = Path.Combine(MountRoot, _config.Path.TrimStart('/'));
     }
+
+    /// <summary>
+    /// Resolves a path configured by the user (e.g. /slytherin/source/file.zip)
+    /// to the real container path under the volume mount (e.g. /local-backups/slytherin/source/file.zip).
+    /// </summary>
+    private string Resolve(string path) => Path.Combine(MountRoot, path.TrimStart('/'));
 
     public bool IsConnected => true; // Always "connected" for local
 
     public Task ConnectAsync(CancellationToken ct = default)
     {
-        Directory.CreateDirectory(_config.Path);
+        Directory.CreateDirectory(_basePath);
         return Task.CompletedTask;
     }
 
@@ -30,12 +40,13 @@ public sealed class LocalTransferService : ITransferService
 
     public async Task UploadAsync(string localPath, string remotePath, IProgress<long>? progress = null, CancellationToken ct = default)
     {
-        var destDir = Path.GetDirectoryName(remotePath);
+        var resolvedPath = Resolve(remotePath);
+        var destDir = Path.GetDirectoryName(resolvedPath);
         if (!string.IsNullOrEmpty(destDir))
             Directory.CreateDirectory(destDir);
 
         await using var source = File.OpenRead(localPath);
-        await using var dest = File.Create(remotePath);
+        await using var dest = File.Create(resolvedPath);
 
         var buffer = new byte[81920];
         long totalBytes = 0;
@@ -58,7 +69,7 @@ public sealed class LocalTransferService : ITransferService
         if (!string.IsNullOrEmpty(destDir))
             Directory.CreateDirectory(destDir);
 
-        await using var source = File.OpenRead(remotePath);
+        await using var source = File.OpenRead(Resolve(remotePath));
         await using var dest = File.Create(localPath);
 
         var buffer = new byte[81920];
@@ -78,18 +89,19 @@ public sealed class LocalTransferService : ITransferService
 
     public async Task DownloadToStreamAsync(string remotePath, Stream destination, CancellationToken ct = default)
     {
-        using var source = File.OpenRead(remotePath);
+        using var source = File.OpenRead(Resolve(remotePath));
         await source.CopyToAsync(destination, ct);
     }
 
     public Task<IReadOnlyList<RemoteFileInfo>> ListDirectoryAsync(string remotePath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        var resolvedPath = Resolve(remotePath);
 
-        if (!Directory.Exists(remotePath))
+        if (!Directory.Exists(resolvedPath))
             return Task.FromResult<IReadOnlyList<RemoteFileInfo>>([]);
 
-        var files = Directory.GetFiles(remotePath)
+        var files = Directory.GetFiles(resolvedPath)
             .Select(f =>
             {
                 var info = new FileInfo(f);
@@ -103,11 +115,12 @@ public sealed class LocalTransferService : ITransferService
     public Task<IReadOnlyList<string>> ListSubdirectoriesAsync(string remotePath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
+        var resolvedPath = Resolve(remotePath);
 
-        if (!Directory.Exists(remotePath))
+        if (!Directory.Exists(resolvedPath))
             return Task.FromResult<IReadOnlyList<string>>([]);
 
-        var dirs = Directory.GetDirectories(remotePath)
+        var dirs = Directory.GetDirectories(resolvedPath)
             .Select(Path.GetFileName)
             .Where(n => n is not null)
             .Cast<string>()
@@ -120,10 +133,11 @@ public sealed class LocalTransferService : ITransferService
     public Task DeleteAsync(string remotePath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (File.Exists(remotePath))
+        var resolvedPath = Resolve(remotePath);
+        if (File.Exists(resolvedPath))
         {
-            File.Delete(remotePath);
-            _logger.LogDebug("Deleted local file {Path}", remotePath);
+            File.Delete(resolvedPath);
+            _logger.LogDebug("Deleted local file {Path}", resolvedPath);
         }
         return Task.CompletedTask;
     }
@@ -131,7 +145,7 @@ public sealed class LocalTransferService : ITransferService
     public Task EnsureDirectoryExistsAsync(string remotePath, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        Directory.CreateDirectory(remotePath);
+        Directory.CreateDirectory(Resolve(remotePath));
         return Task.CompletedTask;
     }
 
@@ -139,8 +153,8 @@ public sealed class LocalTransferService : ITransferService
     {
         try
         {
-            Directory.CreateDirectory(_config.Path);
-            var testFile = Path.Combine(_config.Path, $"safetynet-test-{Guid.NewGuid():N}.tmp");
+            Directory.CreateDirectory(_basePath);
+            var testFile = Path.Combine(_basePath, $"safetynet-test-{Guid.NewGuid():N}.tmp");
             await File.WriteAllTextAsync(testFile, "safetynet connection test", ct);
             File.Delete(testFile);
             return true;
