@@ -11,9 +11,11 @@ public sealed class BackupStateService
 
     public ConcurrentDictionary<string, BackupResult> LastResults { get; } = new();
     public ConcurrentDictionary<Guid, BackupJob> ActiveJobs { get; } = new();
+    public ConcurrentDictionary<string, BackupProgressEvent> LatestProgress { get; } = new();
 
     public void ReportProgress(BackupProgressEvent evt)
     {
+        LatestProgress[evt.Source] = evt;
         OnProgressChanged?.Invoke(evt);
     }
 
@@ -24,6 +26,7 @@ public sealed class BackupStateService
 
     public void ReportCompletion(BackupResult result)
     {
+        LatestProgress.TryRemove(result.SourceName, out _);
         LastResults[result.SourceName] = result;
         OnBackupCompleted?.Invoke(result);
     }

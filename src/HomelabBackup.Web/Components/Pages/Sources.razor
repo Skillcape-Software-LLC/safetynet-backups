@@ -180,18 +180,35 @@ else
 
     protected override void OnInitialized()
     {
+        // Restore state for any already-running backups
+        foreach (var job in State.ActiveJobs.Values)
+        {
+            if (job.Type == BackupJobType.Backup && job.SourceName is not null)
+            {
+                _activeBackups.Add(job.SourceName);
+                _activeJobIds[job.SourceName] = job.JobId;
+            }
+        }
+
+        foreach (var (source, evt) in State.LatestProgress)
+            _progress[source] = evt;
+
         State.OnProgressChanged += OnProgress;
         State.OnBackupCompleted += OnCompleted;
     }
 
     private void BackupSource(string sourceName, bool dryRun)
     {
-        var (jobId, queued) = JobQueue.EnqueueBackup(sourceName, dryRun);
+        var (jobId, queued) = JobQueue.EnqueueBackup(sourceName, dryRun, State);
         if (queued)
         {
             _activeBackups.Add(sourceName);
             _activeJobIds[sourceName] = jobId;
             Toast.Show("Backup Queued", $"{(dryRun ? "Dry run" : "Backup")} started for {sourceName}", Toast.ToastType.Info);
+        }
+        else if (_activeBackups.Contains(sourceName))
+        {
+            Toast.Show("Already Running", $"A backup is already running for {sourceName}", Toast.ToastType.Warning);
         }
         else
         {
@@ -202,7 +219,7 @@ else
 
     private void BackupAll(bool dryRun)
     {
-        var (jobId, queued) = JobQueue.EnqueueBackup(null, dryRun);
+        var (jobId, queued) = JobQueue.EnqueueBackup(null, dryRun, State);
         if (queued)
         {
             foreach (var source in Config.Sources)

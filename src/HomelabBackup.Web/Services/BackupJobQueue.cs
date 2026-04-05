@@ -21,8 +21,16 @@ public sealed class BackupJobQueue
 
     public ChannelReader<BackupJob> Reader => _channel.Reader;
 
-    public (Guid JobId, bool Queued) EnqueueBackup(string? sourceName = null, bool dryRun = false)
+    public (Guid JobId, bool Queued) EnqueueBackup(string? sourceName, bool dryRun, BackupStateService state)
     {
+        // Prevent duplicate backups for the same source
+        if (sourceName is not null &&
+            state.ActiveJobs.Values.Any(j => j.Type == BackupJobType.Backup
+                && string.Equals(j.SourceName, sourceName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return (Guid.Empty, false);
+        }
+
         var job = new BackupJob(Guid.NewGuid(), BackupJobType.Backup, sourceName, dryRun,
             Cts: new CancellationTokenSource());
         var queued = _channel.Writer.TryWrite(job);
