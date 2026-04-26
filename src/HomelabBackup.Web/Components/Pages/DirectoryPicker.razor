@@ -1,4 +1,6 @@
 @rendermode InteractiveServer
+@inject HomelabBackup.Web.Services.PathPresentation Paths
+@using HomelabBackup.Web.Services
 
 @if (_isOpen)
 {
@@ -9,7 +11,7 @@
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">
-                        <i class="bi bi-folder2-open me-2"></i>Browse Directory
+                        <i class="bi bi-folder2-open me-2"></i>@TitleForKind()
                     </h5>
                     <button type="button" class="btn-close" @onclick="Close"></button>
                 </div>
@@ -62,7 +64,7 @@
                     }
                 </div>
                 <div class="modal-footer">
-                    <small class="text-secondary me-auto text-truncate" style="max-width: 60%;">@_currentPath</small>
+                    <small class="text-secondary me-auto text-truncate" style="max-width: 60%;">@FooterPath()</small>
                     <button class="btn btn-outline-secondary" @onclick="Close">Cancel</button>
                     <button class="btn btn-accent" @onclick="SelectCurrentFolder">
                         <i class="bi bi-check-lg me-1"></i>Select This Folder
@@ -75,12 +77,37 @@
 
 @code {
     [Parameter] public string? BrowseRoot { get; set; }
+    [Parameter] public MountKind? Kind { get; set; }
     [Parameter] public EventCallback<string> OnPicked { get; set; }
 
     private bool _isOpen;
     private string _currentPath = "/";
     private List<string> _subdirs = [];
     private string? _browseError;
+
+    private string TitleForKind() => Kind switch
+    {
+        MountKind.Source => "Pick a Source Folder",
+        MountKind.Destination => "Pick a Local Backup Folder",
+        MountKind.Restore => "Pick a Restore Folder",
+        _ => "Browse Directory"
+    };
+
+    private string RootLabelForKind() => Kind switch
+    {
+        MountKind.Source => "Sources",
+        MountKind.Destination => "Local Backups",
+        MountKind.Restore => "Restores",
+        _ => "/"
+    };
+
+    private string FooterPath()
+    {
+        if (Kind is null) return _currentPath;
+        var rel = Paths.ToRelative(_currentPath, Kind.Value);
+        var label = RootLabelForKind();
+        return string.IsNullOrEmpty(rel) ? label : $"{label}/{rel}";
+    }
 
     public void Open()
     {
@@ -155,6 +182,14 @@
                 .Where(s => Path.GetFullPath(s.FullPath)
                     .StartsWith(ceiling, StringComparison.OrdinalIgnoreCase))
                 .ToList();
+
+            // When Kind is set, replace the first visible segment (the ceiling itself) with
+            // a friendly label instead of leaking the container path to the breadcrumb.
+            if (Kind is not null && segments.Count > 0)
+            {
+                var first = segments[0];
+                segments[0] = (RootLabelForKind(), first.FullPath);
+            }
         }
 
         return segments;

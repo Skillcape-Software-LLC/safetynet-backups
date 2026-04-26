@@ -2,7 +2,9 @@
 @rendermode InteractiveServer
 @inject BackupConfig CurrentConfig
 @inject HomelabBackup.Web.Services.ConfigService ConfigService
+@inject HomelabBackup.Web.Services.PathPresentation Paths
 @using HomelabBackup.Core.Config
+@using HomelabBackup.Web.Services
 
 <PageTitle>Config - HomelabBackup</PageTitle>
 
@@ -70,11 +72,27 @@
                     <div class="form-text">Leave empty for one-shot mode</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Source Discovery Folder</label>
-                    <input type="text" class="form-control"
-                           @bind="_browseRoot" @bind:after="RefreshDiscovery"
-                           placeholder="/mnt/docker-volumes (optional)" />
-                    <div class="form-text">Mount a parent folder to browse and select subdirectories as sources</div>
+                    <label class="form-label">Source Discovery</label>
+                    @if (Paths.SourceHost is not null)
+                    {
+                        <div class="form-control-plaintext">
+                            <i class="bi bi-folder2-open me-1"></i>
+                            Discovering subfolders under <code>@Paths.SourceHost</code>.
+                        </div>
+                        <div class="form-text">
+                            Set <code>DOCKER_DIR</code> in your <code>.env</code> to point at a different folder.
+                        </div>
+                    }
+                    else
+                    {
+                        <input type="text" class="form-control"
+                               @bind="_browseRoot" @bind:after="RefreshDiscovery"
+                               placeholder="(optional)" />
+                        <div class="form-text">
+                            Set <code>DOCKER_DIR</code> in your <code>.env</code> to mount a folder for source discovery,
+                            or enter a container path here.
+                        </div>
+                    }
                 </div>
             </div>
         </div>

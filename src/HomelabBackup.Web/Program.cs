@@ -45,6 +45,7 @@ builder.Services.AddSingleton<BackupStateService>();
 builder.Services.AddSingleton<BackupJobQueue>();
 builder.Services.AddHostedService<BackupWorkerService>();
 builder.Services.AddSingleton<InMemoryLoggerProvider>();
+builder.Services.AddSingleton(new PathPresentation(config.BrowseRoot));
 
 var app = builder.Build();
 

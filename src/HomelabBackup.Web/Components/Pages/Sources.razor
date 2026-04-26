@@ -4,6 +4,8 @@
 @inject BackupStateService State
 @inject BackupJobQueue JobQueue
 @inject HomelabBackup.Web.Services.ConfigService ConfigService
+@inject HomelabBackup.Web.Services.PathPresentation Paths
+@using HomelabBackup.Web.Services
 @implements IDisposable
 
 <PageTitle>Sources - HomelabBackup</PageTitle>
@@ -64,7 +66,7 @@ else
                         }
                     </div>
                     <div class="card-body">
-                        <p class="mb-1"><code>@source.Path</code></p>
+                        <p class="mb-1 text-secondary small"><code>@FriendlySourcePath(source.Path)</code></p>
                         @if (source.Exclude.Count > 0)
                         {
                             <p class="text-secondary small mb-2">
@@ -292,6 +294,23 @@ else
 
             StateHasChanged();
         });
+    }
+
+    private string FriendlySourcePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+
+        const string dockerVolumes = "/var/lib/docker/volumes/";
+        if (path.StartsWith(dockerVolumes, StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = path[dockerVolumes.Length..];
+            const string dataSuffix = "/_data";
+            if (rest.EndsWith(dataSuffix, StringComparison.OrdinalIgnoreCase))
+                rest = rest[..^dataSuffix.Length];
+            return rest;
+        }
+
+        return Paths.ToRelative(path, MountKind.Source);
     }
 
     private static int GetProgressPercent(BackupProgressEvent evt) =>

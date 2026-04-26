@@ -2,9 +2,11 @@
 @rendermode InteractiveServer
 @inject BackupConfig Config
 @inject HomelabBackup.Web.Services.ConfigService ConfigService
+@inject HomelabBackup.Web.Services.PathPresentation Paths
 @inject ILoggerFactory LoggerFactory
 @using HomelabBackup.Core.Config
 @using HomelabBackup.Core.Infrastructure
+@using HomelabBackup.Web.Services
 
 <PageTitle>Destinations - HomelabBackup</PageTitle>
 
@@ -56,7 +58,21 @@ else
                     </div>
                     <div class="card-body">
                         <p class="mb-1 text-secondary small">
-                            <i class="bi bi-folder me-1"></i><code>@dest.Path</code>
+                            <i class="bi bi-folder me-1"></i>
+                            @if (dest.Type == DestinationType.Local)
+                            {
+                                var sub = Paths.ToRelative(dest.Path, MountKind.Destination);
+                                var host = Paths.HostHint(sub, MountKind.Destination);
+                                <code>@(string.IsNullOrEmpty(sub) ? "(root)" : sub)</code>
+                                @if (host is not null)
+                                {
+                                    <span class="ms-2">→ <code>@host</code></span>
+                                }
+                            }
+                            else
+                            {
+                                <code>@dest.Path</code>
+                            }
                         </p>
 
                         @if (dest.Type == DestinationType.Ssh)
@@ -133,13 +149,34 @@ else
                 </select>
             </div>
             <div class="mb-3">
-                <label class="form-label">
-                    @(_formType == DestinationType.Ssh ? "Remote Path" :
-                      _formType == DestinationType.Smb ? "Share Path" : "Directory Path")
-                </label>
-                <input type="text" class="form-control" @bind="_formPath"
-                       placeholder="@(_formType == DestinationType.Ssh ? "/backups" :
-                                      _formType == DestinationType.Smb ? "/backups" : "/mnt/backup")" />
+                @if (_formType == DestinationType.Local)
+                {
+                    <label class="form-label">Subfolder</label>
+                    <input type="text" class="form-control" @bind="_formLocalSubfolder"
+                           placeholder="myserver" />
+                    var hostHint = Paths.HostHint(_formLocalSubfolder, MountKind.Destination);
+                    if (hostHint is not null)
+                    {
+                        <div class="form-text">
+                            Files will be saved on the host at <code>@hostHint</code>.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="form-text">
+                            Files will be saved under your <code>LOCAL_BACKUP_DIR</code> mount.
+                            Pick any folder name you like &mdash; you don't need to think about container paths.
+                        </div>
+                    }
+                }
+                else
+                {
+                    <label class="form-label">
+                        @(_formType == DestinationType.Ssh ? "Remote Path" : "Share Path")
+                    </label>
+                    <input type="text" class="form-control" @bind="_formPath"
+                           placeholder="/backups" />
+                }
             </div>
 
             @if (_formType == DestinationType.Ssh)
@@ -244,6 +281,7 @@ else
     private string _formName = "";
     private DestinationType _formType = DestinationType.Ssh;
     private string _formPath = "";
+    private string _formLocalSubfolder = "";
     private string _formSshHost = "";
     private int _formSshPort = 22;
     private string _formSshUser = "";
@@ -260,6 +298,7 @@ else
         _formName = "";
         _formType = DestinationType.Ssh;
         _formPath = "";
+        _formLocalSubfolder = "";
         _formSshHost = "";
         _formSshPort = 22;
         _formSshUser = "";
@@ -280,6 +319,9 @@ else
         _formName = dest.Name;
         _formType = dest.Type;
         _formPath = dest.Path;
+        _formLocalSubfolder = dest.Type == DestinationType.Local
+            ? Paths.ToRelative(dest.Path, MountKind.Destination)
+            : "";
         _formSshHost = dest.SshHost ?? "";
         _formSshPort = dest.SshPort;
         _formSshUser = dest.SshUser ?? "";
@@ -393,7 +435,9 @@ else
         Id = _editingDest?.Id ?? 0,
         Name = _formName,
         Type = _formType,
-        Path = _formPath,
+        Path = _formType == DestinationType.Local
+            ? Paths.ToContainer(_formLocalSubfolder, MountKind.Destination)
+            : _formPath,
         SshHost = _formType == DestinationType.Ssh ? _formSshHost : null,
         SshPort = _formType == DestinationType.Ssh ? _formSshPort : 22,
         SshUser = _formType == DestinationType.Ssh ? _formSshUser : null,

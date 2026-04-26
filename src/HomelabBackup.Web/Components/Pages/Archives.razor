@@ -2,9 +2,11 @@
 @rendermode InteractiveServer
 @inject BackupConfig Config
 @inject BackupJobQueue JobQueue
+@inject HomelabBackup.Web.Services.PathPresentation Paths
 @using HomelabBackup.Core.Config
 @using HomelabBackup.Core.Infrastructure
 @using HomelabBackup.Core.Services
+@using HomelabBackup.Web.Services
 @inject TransferServiceFactory TransferFactory
 @inject IManifestService ManifestService
 
@@ -115,10 +117,24 @@ else
                     <p>Restoring: <code>@_restoreTarget.ArchiveFileName</code></p>
                     <div class="mb-0">
                         <label class="form-label">
-                            <i class="bi bi-folder-check me-1"></i>Restore destination
+                            <i class="bi bi-folder-check me-1"></i>Restore to subfolder
                         </label>
-                        <input type="text" class="form-control" @bind="_restoreDest" />
-                        <div class="form-text">Files will be extracted to this directory.</div>
+                        <input type="text" class="form-control" @bind="_restoreDest" placeholder="myserver" />
+                        @{
+                            var restoreHint = Paths.HostHint(_restoreDest, MountKind.Restore);
+                        }
+                        @if (restoreHint is not null)
+                        {
+                            <div class="form-text">
+                                Files will be extracted on the host at <code>@restoreHint</code>.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="form-text">
+                                Files will be extracted under your <code>RESTORE_DIR</code> mount.
+                            </div>
+                        }
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -233,9 +249,7 @@ else
     private void ShowRestoreDialog(BackupEntry archive)
     {
         _restoreTarget = archive;
-        _restoreDest = !string.IsNullOrWhiteSpace(archive.SourcePath)
-            ? archive.SourcePath
-            : $"/restores/{archive.SourceName}";
+        _restoreDest = archive.SourceName;
     }
 
     private void ConfirmDelete(BackupEntry archive) => _deleteTarget = archive;
@@ -243,8 +257,9 @@ else
     private void ExecuteRestore()
     {
         if (_restoreTarget is null || string.IsNullOrWhiteSpace(_restoreDest)) return;
+        var containerPath = Paths.ToContainer(_restoreDest, MountKind.Restore);
         var (_, queued) = JobQueue.EnqueueRestore(
-            _restoreTarget.ArchiveFileName, _restoreDest, _restoreTarget.DestinationId);
+            _restoreTarget.ArchiveFileName, containerPath, _restoreTarget.DestinationId);
         if (queued)
             Toast.Show("Restore Queued", $"Restoring {_restoreTarget.ArchiveFileName}", Toast.ToastType.Info);
         else
